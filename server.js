@@ -142,6 +142,23 @@ app.get("/", (req, res) => {
   res.send("Shore Roleplay Backend Online 🚀");
 });
 
+// STAFF AUTH 
+
+app.post("/staff-auth", (req, res) => {
+  const { password } = req.body;
+
+  if (!process.env.STAFF_PASSWORD) {
+    return res.status(500).json({ error: "Staff password not configured" });
+  }
+
+  if (password === process.env.STAFF_PASSWORD) {
+    return res.json({ success: true });
+  }
+
+  res.status(401).json({ error: "Invalid password" });
+});
+
+
 /* ===========================
    START SERVER
    =========================== */
