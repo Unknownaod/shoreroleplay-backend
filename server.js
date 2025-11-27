@@ -159,29 +159,63 @@ app.post("/staff-auth", (req, res) => {
 });
 
 
-// SUBMISSION
+// SUBMISSION (HARDENED + VALIDATED)
 
 app.post("/apply", (req, res) => {
-  const { id, username, email } = req.body;
+  try {
+    const { id, username, email, department, reason } = req.body;
 
-  if (!id || !username || !email) {
-    return res.status(400).json({ error: "Missing fields" });
+    // ----------- VALIDATION -----------
+
+    if (!id || typeof id !== "string")
+      return res.status(400).json({ error: "Invalid or missing application ID" });
+
+    if (!username || username.length < 3)
+      return res.status(400).json({ error: "Invalid or missing username" });
+
+    if (!email || !email.includes("@"))
+      return res.status(400).json({ error: "Invalid or missing email" });
+
+    if (!department)
+      return res.status(400).json({ error: "Department not selected" });
+
+    if (!reason || reason.length < 15)
+      return res.status(400).json({ error: "Reason too short" });
+
+    // ----------- READ DATABASE SAFELY -----------
+
+    let db = readDB();
+
+    // Prevent duplicate submissions using email or ID
+    if (db.some(app => app.id === id))
+      return res.status(409).json({ error: "Duplicate application ID" });
+
+    if (db.some(app => app.email.toLowerCase() === email.toLowerCase()))
+      return res.status(409).json({ error: "Application already exists for this email" });
+
+    // ----------- SAVE ENTRY -----------
+
+    db.push({
+      id,
+      username: username.trim(),
+      email: email.toLowerCase().trim(),
+      department,
+      reason,
+      status: "pending",
+      submittedAt: new Date().toISOString()
+    });
+
+    writeDB(db);
+
+    // SUCCESS RESPONSE
+    res.json({ success: true, message: "Application received" });
+
+  } catch (err) {
+    console.error("❌ Application submit error:", err);
+    res.status(500).json({ error: "Internal submission failure" });
   }
-
-  const db = readDB();
-
-  db.push({
-    id,
-    username,
-    email,
-    status: "pending",
-    submittedAt: new Date().toISOString()
-  });
-
-  writeDB(db);
-
-  res.json({ success: true });
 });
+
 
 
 /* ===========================
