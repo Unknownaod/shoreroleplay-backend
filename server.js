@@ -223,6 +223,26 @@ app.post("/apply", (req, res) => {
 });
 
 
+// DELETE APPLICATION
+app.delete("/applications/:id", (req, res) => {
+  try {
+    const { id } = req.params;
+    const db = readDB();
+
+    const index = db.findIndex(app => app.id === id);
+    if (index === -1)
+      return res.status(404).json({ error: "Application not found" });
+
+    db.splice(index, 1); // remove 1 item at index
+    writeDB(db);
+
+    res.json({ success: true, message: "Application deleted" });
+  } catch (err) {
+    console.error("❌ Delete error:", err);
+    res.status(500).json({ error: "Internal delete failure" });
+  }
+});
+
 
 /* ===========================
    START SERVER
