@@ -3,7 +3,8 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
-const brevo = require("@getbrevo/brevo"); // <-- single import
+
+const Brevo = require("@getbrevo/brevo");
 
 const app = express();
 app.use(express.json());
@@ -15,9 +16,7 @@ app.use(cors());
 
 const FROM_NAME = process.env.FROM_NAME || "Shore Roleplay";
 const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@shoreroleplay.xyz";
-const HAS_BREVO_KEY =
-  !!process.env.BREVO_API_KEY &&
-  process.env.BREVO_API_KEY !== "brevo_test_key";
+const HAS_BREVO_KEY = !!process.env.BREVO_API_KEY;
 
 /* ===========================
    BREVO INITIALIZATION (FIXED)
@@ -27,26 +26,27 @@ let brevoApi = null;
 
 if (HAS_BREVO_KEY) {
   try {
-    const Brevo = require("@getbrevo/brevo");
     const client = Brevo.ApiClient.instance;
 
-    // THIS IS THE CORRECT AUTH FIELD NAME
+    // CORRECT AUTH FIELD
     client.authentications["api-key"].apiKey = process.env.BREVO_API_KEY;
+
+    // ABSOLUTELY REQUIRED FOR PRODUCTION DELIVERY
+    client.basePath = "https://api.brevo.com/v3";
 
     brevoApi = new Brevo.TransactionalEmailsApi();
 
-    console.log("✅ Brevo email client initialized");
+    console.log("✅ Brevo email client initialized and ready");
   } catch (err) {
     console.error("❌ Failed to initialize Brevo client:", err);
     brevoApi = null;
   }
 } else {
-  console.warn("⚠️ BREVO_API_KEY not set – emails will only be logged, not actually sent");
+  console.warn("⚠️ BREVO_API_KEY missing — emails will be logged only");
 }
 
-
 /* ===========================
-   “DATABASE” (applications.json)
+   DATABASE
    =========================== */
 
 const dbFile = path.join(__dirname, "applications.json");
@@ -67,7 +67,7 @@ function writeDB(data) {
 const { acceptedEmail, deniedEmail } = require("./emailTemplates");
 
 /* ===========================
-   EMAIL SENDER VIA BREVO
+   EMAIL SENDER
    =========================== */
 
 async function sendDecisionEmail(status, user) {
@@ -81,100 +81,66 @@ async function sendDecisionEmail(status, user) {
       ? "Your Shore Roleplay Application Has Been Approved"
       : "Your Shore Roleplay Application Status";
 
-  // No Brevo? Just log what we *would* send.
   if (!brevoApi) {
-    console.log("📧 [DEV] Would send Brevo email:", {
-      to: user.email,
-      subject,
-    });
+    console.log("📧 [DEV MODE] Email skipped:", { to: user.email, subject });
     return;
   }
 
-  const email = new brevo.SendSmtpEmail();
-  email.sender = { name: FROM_NAME, email: FROM_EMAIL };
-  email.to = [{ email: user.email, name: user.username }];
-  email.subject = subject;
-  email.htmlContent = html;
+  try {
+    const email = new Brevo.SendSmtpEmail();
+    email.sender = { name: FROM_NAME, email: FROM_EMAIL };
+    email.to = [{ email: user.email, name: user.username }];
+    email.subject = subject;
+    email.htmlContent = html;
 
-  await brevoApi.sendTransacEmail(email);
-  console.log(`📧 Brevo email sent to ${user.email}`);
+    await brevoApi.sendTransacEmail(email);
+
+    console.log(`📧 Brevo email sent to ${user.email}`);
+  } catch (err) {
+    console.error("❌ EMAIL SEND ERROR:", err.response?.body || err);
+    throw err;
+  }
 }
 
 /* ===========================
-   API ROUTES
+   ROUTES
    =========================== */
 
-// Get all applications
-app.get("/applications", (req, res) => {
-  res.json(readDB());
-});
+// HEALTH CHECK
+app.get("/", (req, res) => res.send("Shore Roleplay Backend Online 🚀"));
 
-// Accept / Deny application
-app.post("/applications/:id/decision", async (req, res) => {
-  const { id } = req.params;
-  const { status } = req.body;
+// GET ALL APPLICATIONS
+app.get("/applications", (req, res) => res.json(readDB()));
 
-  if (!["accepted", "denied"].includes(status)) {
-    return res.status(400).json({ error: "Invalid status" });
-  }
-
-  const db = readDB();
-  const idx = db.findIndex((a) => a.id === id);
-
-  if (idx === -1) {
-    return res.status(404).json({ error: "Application not found" });
-  }
-
-  db[idx].status = status;
-  writeDB(db);
-
-  try {
-    await sendDecisionEmail(status, db[idx]);
-    res.json({ success: true, status });
-  } catch (err) {
-    console.error("❌ Error sending Brevo email:", err);
-    res.status(500).json({ error: "Email failed" });
-  }
-});
-
-// Simple health check
-app.get("/", (req, res) => {
-  res.send("Shore Roleplay Backend Online 🚀");
-});
-
-// STAFF AUTH 
-
+// STAFF AUTH
 app.post("/staff-auth", (req, res) => {
   const { password } = req.body;
 
-  if (!process.env.STAFF_PANEL_PASSWORD) {
+  if (!process.env.STAFF_PANEL_PASSWORD)
     return res.status(500).json({ error: "Staff password not configured" });
-  }
 
-  if (password === process.env.STAFF_PANEL_PASSWORD) {
+  if (password === process.env.STAFF_PANEL_PASSWORD)
     return res.json({ success: true });
-  }
 
   res.status(401).json({ error: "Invalid password" });
 });
 
-
-// SUBMISSION (HARDENED + AGREEMENT ENFORCED)
+/* ===========================
+   APPLICATION SUBMISSION
+   =========================== */
 
 app.post("/apply", (req, res) => {
   try {
     const { id, username, email, department, reason, agreedLogging, agreedDiscord } = req.body;
 
-    // ----------- VALIDATION -----------
-
     if (!id || typeof id !== "string")
       return res.status(400).json({ error: "Invalid or missing application ID" });
 
     if (!username || username.trim().length < 3)
-      return res.status(400).json({ error: "Invalid or missing username" });
+      return res.status(400).json({ error: "Invalid username" });
 
     if (!email || !email.includes("@"))
-      return res.status(400).json({ error: "Invalid or missing email" });
+      return res.status(400).json({ error: "Invalid email" });
 
     if (!department)
       return res.status(400).json({ error: "Department not selected" });
@@ -182,22 +148,16 @@ app.post("/apply", (req, res) => {
     if (!reason || reason.trim().length < 100)
       return res.status(400).json({ error: "Reason must be at least 100 characters" });
 
-    // REQUIRED AGREEMENTS
     if (!agreedLogging || !agreedDiscord)
       return res.status(400).json({ error: "Required agreements not accepted" });
 
-    // ----------- READ DATABASE SAFELY -----------
-
     let db = readDB();
 
-    // Prevent duplicate submissions using email or ID
-    if (db.some(app => app.id === id))
+    if (db.some(a => a.id === id))
       return res.status(409).json({ error: "Duplicate application ID" });
 
-    if (db.some(app => app.email.toLowerCase() === email.toLowerCase()))
+    if (db.some(a => a.email.toLowerCase() === email.toLowerCase()))
       return res.status(409).json({ error: "Application already exists for this email" });
-
-    // ----------- SAVE ENTRY -----------
 
     db.push({
       id,
@@ -212,28 +172,57 @@ app.post("/apply", (req, res) => {
     });
 
     writeDB(db);
-
-    // SUCCESS RESPONSE
     res.json({ success: true, message: "Application received" });
-
   } catch (err) {
-    console.error("❌ Application submit error:", err);
-    res.status(500).json({ error: "Internal submission failure" });
+    console.error("❌ Application Submit Error:", err);
+    res.status(500).json({ error: "Internal error" });
   }
 });
 
+/* ===========================
+   DECISION HANDLER
+   =========================== */
 
-// DELETE APPLICATION
+app.post("/applications/:id/decision", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!["accepted", "denied"].includes(status))
+      return res.status(400).json({ error: "Invalid status" });
+
+    const db = readDB();
+    const idx = db.findIndex(a => a.id === id);
+
+    if (idx === -1)
+      return res.status(404).json({ error: "Application not found" });
+
+    db[idx].status = status;
+    writeDB(db);
+
+    await sendDecisionEmail(status, db[idx]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Decision error:", err);
+    res.status(500).json({ error: "Email failed" });
+  }
+});
+
+/* ===========================
+   DELETE APPLICATION
+   =========================== */
+
 app.delete("/applications/:id", (req, res) => {
   try {
     const { id } = req.params;
     const db = readDB();
 
-    const index = db.findIndex(app => app.id === id);
+    const index = db.findIndex(a => a.id === id);
     if (index === -1)
       return res.status(404).json({ error: "Application not found" });
 
-    db.splice(index, 1); // remove 1 item at index
+    db.splice(index, 1);
     writeDB(db);
 
     res.json({ success: true, message: "Application deleted" });
@@ -243,12 +232,11 @@ app.delete("/applications/:id", (req, res) => {
   }
 });
 
-
 /* ===========================
    START SERVER
    =========================== */
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Backend running on port ${PORT}`);
-});
+app.listen(PORT, () =>
+  console.log(`🚀 Shore Roleplay backend running on port ${PORT}`)
+);
