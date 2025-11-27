@@ -41,7 +41,7 @@ app.get("/auth", passport.authenticate("discord"));
 // Discord redirects here
 app.get("/auth/callback",
   passport.authenticate("discord", { failureRedirect: "/" }),
-  (req, res) => res.redirect("/") // send back to frontend
+  (req, res) => res.redirect("https://shoreroleplay.xyz")
 );
 
 // Logout user
