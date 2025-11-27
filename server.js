@@ -159,6 +159,31 @@ app.post("/staff-auth", (req, res) => {
 });
 
 
+// SUBMISSION
+
+app.post("/apply", (req, res) => {
+  const { id, username, email } = req.body;
+
+  if (!id || !username || !email) {
+    return res.status(400).json({ error: "Missing fields" });
+  }
+
+  const db = readDB();
+
+  db.push({
+    id,
+    username,
+    email,
+    status: "pending",
+    submittedAt: new Date().toISOString()
+  });
+
+  writeDB(db);
+
+  res.json({ success: true });
+});
+
+
 /* ===========================
    START SERVER
    =========================== */
