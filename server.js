@@ -20,28 +20,30 @@ const HAS_BREVO_KEY =
   process.env.BREVO_API_KEY !== "brevo_test_key";
 
 /* ===========================
-   BREVO INITIALIZATION
+   BREVO INITIALIZATION (FIXED)
    =========================== */
 
 let brevoApi = null;
 
 if (HAS_BREVO_KEY) {
   try {
-    brevoApi = new brevo.TransactionalEmailsApi();
-    brevoApi.setApiKey(
-      brevo.TransactionalEmailsApiApiKeys.apiKey,
-      process.env.BREVO_API_KEY
-    );
+    const Brevo = require("@getbrevo/brevo");
+    const client = Brevo.ApiClient.instance;
+
+    // THIS IS THE CORRECT AUTH FIELD NAME
+    client.authentications["api-key"].apiKey = process.env.BREVO_API_KEY;
+
+    brevoApi = new Brevo.TransactionalEmailsApi();
+
     console.log("✅ Brevo email client initialized");
   } catch (err) {
     console.error("❌ Failed to initialize Brevo client:", err);
     brevoApi = null;
   }
 } else {
-  console.warn(
-    "⚠️ BREVO_API_KEY not set – emails will only be logged, not actually sent"
-  );
+  console.warn("⚠️ BREVO_API_KEY not set – emails will only be logged, not actually sent");
 }
+
 
 /* ===========================
    “DATABASE” (applications.json)
