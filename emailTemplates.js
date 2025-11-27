@@ -33,7 +33,7 @@ function acceptedEmail({ username }) {
     <p>Your application to join <strong>Shore Roleplay</strong> has been reviewed and <strong>APPROVED</strong>.</p>
     <p>You are now officially cleared to join and participate in our community’s roleplay environment.</p>
     <p style="margin-top:15px;">Please ensure you’ve joined our Discord server and reviewed all operational guidelines.</p>
-    <a href="https://discord.gg/" style="display:inline-block;margin-top:20px;padding:14px 28px;background:#2ecc71;color:white;text-decoration:none;border-radius:6px;font-weight:600;">
+    <a href="https://discord.gg/KJdnacyDXA" style="display:inline-block;margin-top:20px;padding:14px 28px;background:#2ecc71;color:white;text-decoration:none;border-radius:6px;font-weight:600;">
       Join Discord
     </a>
   `);
