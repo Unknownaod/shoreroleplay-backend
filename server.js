@@ -3,69 +3,83 @@ const express = require("express");
 const session = require("express-session");
 const passport = require("passport");
 const DiscordStrategy = require("passport-discord").Strategy;
+const cors = require("cors");
 const path = require("path");
 
 const app = express();
-const cors = require("cors");
 
+/* ===========================
+   CORS FIX FOR FRONTEND DOMAIN
+   =========================== */
 app.use(cors({
-  origin: ["https://www.shoreroleplay.xyz", "https://shoreroleplay.xyz"],
+  origin: ["https://shoreroleplay.xyz", "https://www.shoreroleplay.xyz"],
   credentials: true
 }));
 
-// Serve your front-end (public folder)
-app.use(express.static(path.join(__dirname, "public")));
+/* Required for secure cookies behind Render proxy */
+app.set("trust proxy", 1);
 
+/* ===========================
+   SESSION (ONLY ONCE!)
+   =========================== */
 app.use(session({
   secret: process.env.SESSION_SECRET || "SHORERP-SECRET",
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 86400000 } // 1 day
+  cookie: {
+    secure: true,          // HTTPS-only cookie
+    httpOnly: true,
+    sameSite: "none",      // REQUIRED for cross-domain
+    maxAge: 86400000       // 1 day
+  }
 }));
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
 
 app.use(passport.initialize());
 app.use(passport.session());
 
+/* ===========================
+   PASSPORT DISCORD STRATEGY
+   =========================== */
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
 passport.use(new DiscordStrategy({
   clientID: process.env.DISCORD_CLIENT_ID,
   clientSecret: process.env.DISCORD_CLIENT_SECRET,
-  callbackURL: `${process.env.CALLBACK_URL}`, // IMPORTANT CHANGE
+  callbackURL: process.env.CALLBACK_URL, // MUST MATCH DISCORD PORTAL
   scope: ["identify"]
 }, (accessToken, refreshToken, profile, done) => done(null, profile)));
 
 
-// =====================
-// AUTH ROUTES
-// =====================
+/* ===========================
+   AUTH ROUTES
+   =========================== */
 
-// Start OAuth
+// Discord login start
 app.get("/auth", passport.authenticate("discord"));
 
-// Discord redirects here
+// Discord returns here
 app.get("/auth/callback",
   passport.authenticate("discord", { failureRedirect: "https://shoreroleplay.xyz" }),
-  (req, res) => setTimeout(() => res.redirect("https://shoreroleplay.xyz"), 300)
+  (req, res) => res.redirect("https://shoreroleplay.xyz")
 );
 
-// Logout user
+// Logout
 app.get("/logout", (req, res) => {
-  req.session.destroy(() => res.redirect("/"));
+  req.session.destroy(() => res.redirect("https://shoreroleplay.xyz"));
 });
 
-// Returns the logged-in Discord user
+// Returns logged-in Discord user
 app.get("/user", (req, res) => {
   res.json(req.user || {});
 });
 
 
-// =====================
-// SERVER LISTENER
-// =====================
-
+/* ===========================
+   SERVER
+   =========================== */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log(`Shore Roleplay Auth Server running on port ${PORT}`)
-);
+app.listen(PORT, () => console.log("Auth server running on " + PORT));
