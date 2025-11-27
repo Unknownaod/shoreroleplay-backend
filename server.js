@@ -147,11 +147,11 @@ app.get("/", (req, res) => {
 app.post("/staff-auth", (req, res) => {
   const { password } = req.body;
 
-  if (!process.env.STAFF_PASSWORD) {
+  if (!process.env.STAFF_PANEL_PASSWORD) {
     return res.status(500).json({ error: "Staff password not configured" });
   }
 
-  if (password === process.env.STAFF_PASSWORD) {
+  if (password === process.env.STAFF_PANEL_PASSWORD) {
     return res.json({ success: true });
   }
 
