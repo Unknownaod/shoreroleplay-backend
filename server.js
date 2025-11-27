@@ -26,15 +26,17 @@ const STAFF_PASSWORD = process.env.STAFF_PANEL_PASSWORD;
 /* ===========================
    BREVO EMAIL API
    =========================== */
-
 const brevoClient = new Brevo.TransactionalEmailsApi();
+
+// Correct API key reference here:
 brevoClient.setApiKey(
-  Brevo.TransactionalEmailsApiApiKeys.apiKey,
+  Brevo.TransactionalEmailsApi.ApiKeys.apiKey,
   process.env.BREVO_API_KEY
 );
 
 const FROM_NAME = process.env.FROM_NAME || "Shore Roleplay";
 const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@shoreroleplay.xyz";
+
 
 const { acceptedEmail, deniedEmail } = require("./emailTemplates");
 
