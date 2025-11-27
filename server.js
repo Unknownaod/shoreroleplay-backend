@@ -159,18 +159,18 @@ app.post("/staff-auth", (req, res) => {
 });
 
 
-// SUBMISSION (HARDENED + VALIDATED)
+// SUBMISSION (HARDENED + AGREEMENT ENFORCED)
 
 app.post("/apply", (req, res) => {
   try {
-    const { id, username, email, department, reason } = req.body;
+    const { id, username, email, department, reason, agreedLogging, agreedDiscord } = req.body;
 
     // ----------- VALIDATION -----------
 
     if (!id || typeof id !== "string")
       return res.status(400).json({ error: "Invalid or missing application ID" });
 
-    if (!username || username.length < 3)
+    if (!username || username.trim().length < 3)
       return res.status(400).json({ error: "Invalid or missing username" });
 
     if (!email || !email.includes("@"))
@@ -179,8 +179,12 @@ app.post("/apply", (req, res) => {
     if (!department)
       return res.status(400).json({ error: "Department not selected" });
 
-    if (!reason || reason.length < 100)
-      return res.status(400).json({ error: "Reason too short" });
+    if (!reason || reason.trim().length < 100)
+      return res.status(400).json({ error: "Reason must be at least 100 characters" });
+
+    // REQUIRED AGREEMENTS
+    if (!agreedLogging || !agreedDiscord)
+      return res.status(400).json({ error: "Required agreements not accepted" });
 
     // ----------- READ DATABASE SAFELY -----------
 
@@ -200,7 +204,9 @@ app.post("/apply", (req, res) => {
       username: username.trim(),
       email: email.toLowerCase().trim(),
       department,
-      reason,
+      reason: reason.trim(),
+      agreedLogging: true,
+      agreedDiscord: true,
       status: "pending",
       submittedAt: new Date().toISOString()
     });
