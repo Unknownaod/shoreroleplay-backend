@@ -97,7 +97,7 @@ function deniedEmail({ username }) {
     <p style="margin-top:16px;">Should you choose to reapply, ensure that your submission reflects a complete and compliant understanding of our expectations and environment.</p>
 
     <div style="margin-top:35px;text-align:center;">
-      <a href="${BRAND.website}/apply"
+      <a href="${BRAND.website}/public/apply.html"
          style="display:inline-block;padding:14px 32px;background:${BRAND.denied};color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;">
          Submit Revised Application
       </a>
