@@ -6,6 +6,12 @@ const DiscordStrategy = require("passport-discord").Strategy;
 const path = require("path");
 
 const app = express();
+const cors = require("cors");
+
+app.use(cors({
+  origin: ["https://www.shoreroleplay.xyz", "https://shoreroleplay.xyz"],
+  credentials: true
+}));
 
 // Serve your front-end (public folder)
 app.use(express.static(path.join(__dirname, "public")));
