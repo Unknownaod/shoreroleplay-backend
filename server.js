@@ -9,21 +9,23 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DATA_FILE = path.join(__dirname, "applications.json");
 
-// ---- CORS (allow your Vercel site) ----
-app.use(cors({
-  origin: process.env.FRONTEND_ORIGIN,
-  credentials: false
-}));
+// ---------- CORS ----------
+app.use(
+  cors({
+    origin: process.env.FRONTEND_ORIGIN || "*",
+    credentials: false
+  })
+);
 
 app.use(express.json());
 
-// ---- Helpers for JSON file ----
+// ---------- JSON FILE HELPERS ----------
 function readApplications() {
   try {
     const raw = fs.readFileSync(DATA_FILE, "utf8");
     return JSON.parse(raw || "[]");
-  } catch (e) {
-    console.error("Error reading applications.json:", e);
+  } catch (err) {
+    console.error("Error reading applications.json:", err);
     return [];
   }
 }
@@ -32,7 +34,7 @@ function writeApplications(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf8");
 }
 
-// ---- Mailer setup ----
+// ---------- SMTP TRANSPORT (BREVO) ----------
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT || 587),
@@ -43,7 +45,7 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-function baseTemplate({ title, subtitle, bodyHtml, badgeColor, badgeText }) {
+function baseTemplate({ title, badgeText, badgeColor, subtitle, bodyHtml }) {
   return `
   <!DOCTYPE html>
   <html lang="en">
@@ -99,29 +101,30 @@ function baseTemplate({ title, subtitle, bodyHtml, badgeColor, badgeText }) {
   </html>`;
 }
 
-function acceptedEmail(username) {
+function acceptedEmail(app) {
   return baseTemplate({
     title: "APPLICATION APPROVED",
-    subtitle: "Your application to Shore Roleplay has been reviewed and approved.",
-    badgeColor: "#22c55e",
     badgeText: "Approved",
+    badgeColor: "#22c55e",
+    subtitle: `Your application to Shore Roleplay – ${app.department} has been approved.`,
     bodyHtml: `
-      <p style="margin:0 0 12px 0;">
-        Hi${username ? " " + username : ""},
+      <p>Hi ${app.fullName || "there"},</p>
+      <p>
+        Congratulations – your application for the
+        <strong>${app.department}</strong> department at
+        <strong>Shore Roleplay</strong> has been <strong>accepted</strong>.
       </p>
-      <p style="margin:0 0 12px 0;">
-        Congratulations – your application to <strong>Shore Roleplay</strong> has been <strong>accepted</strong>.
+      <p>
+        Please join our Discord and follow the onboarding instructions in the
+        designated channels.
       </p>
-      <p style="margin:0 0 18px 0;">
-        To get started, please join our Discord and follow the onboarding channels.
-      </p>
-      <p style="margin:0 0 24px 0;" align="center">
+      <p style="margin:18px 0;" align="center">
         <a href="https://discord.gg/YOUR_INVITE_HERE"
            style="display:inline-block;padding:11px 26px;border-radius:999px;background:#1f75ff;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;">
           Join Shore Roleplay Discord
         </a>
       </p>
-      <p style="margin:0;">
+      <p>
         Welcome aboard,<br/>
         <strong>Shore Roleplay Staff Team</strong>
       </p>
@@ -129,24 +132,28 @@ function acceptedEmail(username) {
   });
 }
 
-function deniedEmail(username) {
+function deniedEmail(app) {
   return baseTemplate({
     title: "APPLICATION REVIEWED",
-    subtitle: "Your application to Shore Roleplay has been reviewed.",
-    badgeColor: "#ef4444",
     badgeText: "Not Approved",
+    badgeColor: "#ef4444",
+    subtitle: `Your application to Shore Roleplay – ${app.department} has been reviewed.`,
     bodyHtml: `
-      <p style="margin:0 0 12px 0;">
-        Hi${username ? " " + username : ""},
+      <p>Hi ${app.fullName || "there"},</p>
+      <p>
+        Thank you for applying to the
+        <strong>${app.department}</strong> department at
+        <strong>Shore Roleplay</strong>.
       </p>
-      <p style="margin:0 0 12px 0;">
-        Thank you for taking the time to apply to <strong>Shore Roleplay</strong>. 
-        After careful review, we are unfortunately not able to approve your application at this time.
+      <p>
+        After careful review, we are unfortunately not able to approve your
+        application at this time.
       </p>
-      <p style="margin:0 0 12px 0;">
-        You are welcome to re-apply after <strong>30 days</strong> if your experience or availability has changed.
+      <p>
+        You are welcome to reapply after <strong>30 days</strong> if your
+        experience or availability has changed.
       </p>
-      <p style="margin:0;">
+      <p>
         Respectfully,<br/>
         <strong>Shore Roleplay Staff Team</strong>
       </p>
@@ -154,64 +161,86 @@ function deniedEmail(username) {
   });
 }
 
-async function sendDecisionEmail({ email, name, status }) {
-  const html = status === "accepted"
-    ? acceptedEmail(name)
-    : deniedEmail(name);
+async function sendDecisionEmail(app, decision) {
+  const html =
+    decision === "accepted" ? acceptedEmail(app) : deniedEmail(app);
 
-  const subject = status === "accepted"
-    ? "Shore Roleplay Application Approved"
-    : "Shore Roleplay Application Result";
+  const subject =
+    decision === "accepted"
+      ? "Shore Roleplay Application Approved"
+      : "Shore Roleplay Application Result";
+
+  if (!app.email) return;
 
   await transporter.sendMail({
-    from: `Shore Roleplay <${process.env.FROM_EMAIL}>`,
-    to: email,
+    from: process.env.FROM_EMAIL,
+    to: app.email,
     subject,
     html
   });
 }
 
-// ---------- ROUTES ----------
-
-// Public: create application
+// ---------- PUBLIC: SUBMIT APPLICATION ----------
 app.post("/api/apply", (req, res) => {
-  const { name, email, age, discord, about } = req.body;
+  const {
+    fullName,
+    email,
+    discord,
+    department,
+    age,
+    timezone,
+    experience,
+    certifications,
+    backgroundConsent,
+    motivation,
+    availability
+  } = req.body;
 
-  if (!name || !email || !about) {
-    return res.status(400).json({ error: "Missing required fields." });
+  if (!fullName || !email || !discord || !department || !motivation) {
+    return res.status(400).json({
+      error:
+        "Missing required fields (fullName, email, discord, department, motivation)."
+    });
   }
 
-  const applications = readApplications();
+  const apps = readApplications();
 
-  const appEntry = {
+  const entry = {
     id: Date.now().toString(),
-    name,
+    fullName,
     email,
+    discord,
+    department,
     age: age || null,
-    discord: discord || null,
-    about,
+    timezone: timezone || null,
+    experience: experience || null,
+    certifications: certifications || null,
+    backgroundConsent: backgroundConsent || null,
+    motivation,
+    availability: availability || null,
     status: "pending",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
 
-  applications.push(appEntry);
-  writeApplications(applications);
+  apps.push(entry);
+  writeApplications(apps);
 
-  res.json({ ok: true, id: appEntry.id });
+  res.json({ ok: true, id: entry.id });
 });
 
-// Staff: list applications (requires simple password in query)
+// ---------- STAFF: GET ALL APPLICATIONS ----------
 app.get("/api/applications", (req, res) => {
   const key = req.query.key;
   if (key !== process.env.STAFF_PANEL_PASSWORD) {
     return res.status(403).json({ error: "Forbidden" });
   }
+
   const apps = readApplications();
   res.json(apps);
 });
 
-// Staff: decide application
+// ---------- STAFF: MAKE DECISION ----------
 app.post("/api/applications/:id/decision", async (req, res) => {
   const key = req.query.key;
   if (key !== process.env.STAFF_PANEL_PASSWORD) {
@@ -226,8 +255,10 @@ app.post("/api/applications/:id/decision", async (req, res) => {
   }
 
   const apps = readApplications();
-  const idx = apps.findIndex(a => a.id === id);
-  if (idx === -1) return res.status(404).json({ error: "Not found" });
+  const idx = apps.findIndex((a) => a.id === id);
+  if (idx === -1) {
+    return res.status(404).json({ error: "Application not found" });
+  }
 
   const appEntry = apps[idx];
   apps[idx] = {
@@ -238,19 +269,16 @@ app.post("/api/applications/:id/decision", async (req, res) => {
   writeApplications(apps);
 
   try {
-    await sendDecisionEmail({
-      email: appEntry.email,
-      name: appEntry.name,
-      status: decision
-    });
-  } catch (e) {
-    console.error("Error sending mail:", e);
-    // Still return success for now
+    await sendDecisionEmail(appEntry, decision);
+  } catch (err) {
+    console.error("Error sending decision email:", err);
+    // still return OK for now
   }
 
   res.json({ ok: true });
 });
 
+// ---------- START SERVER ----------
 app.listen(PORT, () => {
-  console.log("Shore Staff Backend running on port", PORT);
+  console.log(`Shore Roleplay backend listening on port ${PORT}`);
 });
