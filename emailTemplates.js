@@ -2,52 +2,34 @@
  * Application Accepted Email Template
  * Returns HTML string
  */
+/**
+ * Application Accepted Template
+ */
 function acceptedEmail({ username }) {
   return `
-    <div style="font-family: Arial, sans-serif; padding: 20px; background: #f6f8fb;">
+    <div style="font-family:Arial,sans-serif;padding:20px;background:#f6f8fb;">
       <h2 style="color:#2ecc71;">Your Application Has Been Approved!</h2>
-
       <p>Hello <strong>${username}</strong>,</p>
-
-      <p>We're excited to inform you that your application to join 
-      <strong>Shore Roleplay</strong> has been <span style="color:#2ecc71;font-weight:bold;">
-      ACCEPTED</span>.</p>
-
-      <p>You may now join the server and begin your roleplay journey. 
-      Make sure you follow all community guidelines and respect other players.</p>
-
-      <p style="margin-top:25px;">Welcome aboard, and we can't wait to see you in game!</p>
-
-      <hr style="margin:30px 0; border: none; border-top: 1px solid #ddd;" />
-
-      <small>This is an automated message. Please do not reply.</small>
+      <p>We're excited to welcome you to <strong>Shore Roleplay</strong>!</p>
+      <p>Your whitelist application has been accepted. You may now join the server and begin roleplaying.</p>
+      <br>
+      <small>This is an automated email. Please do not reply.</small>
     </div>
   `;
 }
 
 /**
- * Application Denied Email Template
- * Returns HTML string
+ * Application Denied Template
  */
 function deniedEmail({ username }) {
   return `
-    <div style="font-family: Arial, sans-serif; padding: 20px; background: #f6f8fb;">
-      <h2 style="color:#e74c3c;">Application Status Update</h2>
-
+    <div style="font-family:Arial,sans-serif;padding:20px;background:#f6f8fb;">
+      <h2 style="color:#e74c3c;">Your Application Has Been Denied</h2>
       <p>Hello <strong>${username}</strong>,</p>
-
-      <p>We regret to inform you that your application to join
-      <strong>Shore Roleplay</strong> has been
-      <span style="color:#e74c3c;font-weight:bold;">DENIED</span>.</p>
-
-      <p>This decision may be based on incomplete answers, rule concerns, or other factors.
-      You are welcome to review the rules and reapply in the future.</p>
-
-      <p style="margin-top:25px;">Thank you for your interest in our community.</p>
-
-      <hr style="margin:30px 0; border: none; border-top: 1px solid #ddd;" />
-
-      <small>This is an automated message. Please do not reply.</small>
+      <p>We regret to inform you that your whitelist application for <strong>Shore Roleplay</strong> was not approved.</p>
+      <p>You may reapply in the future after reviewing our rules.</p>
+      <br>
+      <small>This is an automated email. Please do not reply.</small>
     </div>
   `;
 }
