@@ -14,11 +14,11 @@ const transporter = nodemailer.createTransport({
   port: Number(process.env.SMTP_PORT || 587),
   secure: false,                    // MUST be false for Brevo port 587
   auth: {
-    user: process.env.SMTP_USER,    // brevo login user
-    pass: process.env.SMTP_PASS     // brevo API key
+    user: process.env.SMTP_USER,    // full brevo login / email
+    pass: process.env.SMTP_PASS     // BREVO API KEY
   },
   tls: {
-    rejectUnauthorized: false       // Prevent certificate issues on Render
+    rejectUnauthorized: false       // Avoids TLS issues on Render
   }
 });
 
@@ -32,6 +32,7 @@ async function sendApplicationEmail(status, data) {
 
   const isAccepted = status === "accepted";
 
+  // BUILD THE TEMPLATE HTML
   const html = isAccepted
     ? acceptedEmail({ username })
     : deniedEmail({ username });
@@ -43,9 +44,9 @@ async function sendApplicationEmail(status, data) {
   await transporter.sendMail({
     from: `${FROM_NAME} <${FROM_EMAIL}>`,
     to: email,
-    replyTo: FROM_EMAIL, // Proper reply address
+    replyTo: FROM_EMAIL,
     subject,
-    html
+    html,
   });
 
   console.log(`📧 Email sent to ${email} (${status})`);
