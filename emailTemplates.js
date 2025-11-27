@@ -1,55 +1,55 @@
-const nodemailer = require("nodemailer");
-const { acceptedEmail, deniedEmail } = require("./emailTemplates");
-
-// Use values from ENV for flexibility
-const FROM_NAME = process.env.FROM_NAME || "Shore Roleplay";
-const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@shoreroleplay.xyz";
-
 /**
- * Configure SMTP Transport
- * Brevo requires STARTTLS on port 587
+ * Application Accepted Email Template
+ * Returns HTML string
  */
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,      // smtp-relay.brevo.com
-  port: Number(process.env.SMTP_PORT || 587),
-  secure: false,                    // MUST be false for Brevo port 587
-  auth: {
-    user: process.env.SMTP_USER,    // full brevo login / email
-    pass: process.env.SMTP_PASS     // BREVO API KEY
-  },
-  tls: {
-    rejectUnauthorized: false       // Avoids TLS issues on Render
-  }
-});
+function acceptedEmail({ username }) {
+  return `
+    <div style="font-family: Arial, sans-serif; padding: 20px; background: #f6f8fb;">
+      <h2 style="color:#2ecc71;">Your Application Has Been Approved!</h2>
 
-/**
- * Send acceptance or denial email
- * status: "accepted" | "denied"
- * data: { email, username }
- */
-async function sendApplicationEmail(status, data) {
-  const { email, username } = data;
+      <p>Hello <strong>${username}</strong>,</p>
 
-  const isAccepted = status === "accepted";
+      <p>We're excited to inform you that your application to join 
+      <strong>Shore Roleplay</strong> has been <span style="color:#2ecc71;font-weight:bold;">
+      ACCEPTED</span>.</p>
 
-  // BUILD THE TEMPLATE HTML
-  const html = isAccepted
-    ? acceptedEmail({ username })
-    : deniedEmail({ username });
+      <p>You may now join the server and begin your roleplay journey. 
+      Make sure you follow all community guidelines and respect other players.</p>
 
-  const subject = isAccepted
-    ? "Your Shore Roleplay Application Has Been Approved"
-    : "Your Shore Roleplay Application Status";
+      <p style="margin-top:25px;">Welcome aboard, and we can't wait to see you in game!</p>
 
-  await transporter.sendMail({
-    from: `${FROM_NAME} <${FROM_EMAIL}>`,
-    to: email,
-    replyTo: FROM_EMAIL,
-    subject,
-    html,
-  });
+      <hr style="margin:30px 0; border: none; border-top: 1px solid #ddd;" />
 
-  console.log(`📧 Email sent to ${email} (${status})`);
+      <small>This is an automated message. Please do not reply.</small>
+    </div>
+  `;
 }
 
-module.exports = { sendApplicationEmail };
+/**
+ * Application Denied Email Template
+ * Returns HTML string
+ */
+function deniedEmail({ username }) {
+  return `
+    <div style="font-family: Arial, sans-serif; padding: 20px; background: #f6f8fb;">
+      <h2 style="color:#e74c3c;">Application Status Update</h2>
+
+      <p>Hello <strong>${username}</strong>,</p>
+
+      <p>We regret to inform you that your application to join
+      <strong>Shore Roleplay</strong> has been
+      <span style="color:#e74c3c;font-weight:bold;">DENIED</span>.</p>
+
+      <p>This decision may be based on incomplete answers, rule concerns, or other factors.
+      You are welcome to review the rules and reapply in the future.</p>
+
+      <p style="margin-top:25px;">Thank you for your interest in our community.</p>
+
+      <hr style="margin:30px 0; border: none; border-top: 1px solid #ddd;" />
+
+      <small>This is an automated message. Please do not reply.</small>
+    </div>
+  `;
+}
+
+module.exports = { acceptedEmail, deniedEmail };
