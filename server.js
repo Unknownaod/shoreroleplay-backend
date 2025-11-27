@@ -40,7 +40,7 @@ app.get("/auth", passport.authenticate("discord"));
 
 // Discord redirects here
 app.get("/auth/callback",
-  passport.authenticate("discord", { failureRedirect: "/" }),
+  passport.authenticate("discord", { failureRedirect: "https://shoreroleplay.xyz" }),
   (req, res) => res.redirect("https://shoreroleplay.xyz")
 );
 
