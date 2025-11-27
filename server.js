@@ -179,7 +179,7 @@ app.post("/apply", (req, res) => {
     if (!department)
       return res.status(400).json({ error: "Department not selected" });
 
-    if (!reason || reason.length < 15)
+    if (!reason || reason.length < 100)
       return res.status(400).json({ error: "Reason too short" });
 
     // ----------- READ DATABASE SAFELY -----------
