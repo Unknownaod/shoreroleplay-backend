@@ -643,7 +643,7 @@ app.get("/users", async (req, res) => {
    FORUM: THREADS & REPLIES
    =========================== */
 
-// CREATE THREAD (requires accepted department)
+// CREATE THREAD (requires accepted department OR staff)
 app.post("/threads", async (req, res) => {
   try {
     const { title, body, category, userId } = req.body;
@@ -656,13 +656,12 @@ app.post("/threads", async (req, res) => {
     const user = await Users.findOne({ id: userId });
     if (!user) return res.status(401).json({ error: "Not logged in" });
 
-    // B OPTION ENFORCED HERE
-    const allowed =
-      (await userHasDepartment(user.email)) || isStaff(user);
-
+    // USER MUST BE STAFF OR HAVE AN ACCEPTED DEPARTMENT
+    const allowed = (await userHasDepartment(user.email)) || isStaff(user);
     if (!allowed)
       return res.status(403).json({
-        error: "You must be a staff member or accepted into a department to post threads"
+        error:
+          "You must be staff or accepted into a department to create threads",
       });
 
     const thread = {
@@ -684,7 +683,7 @@ app.post("/threads", async (req, res) => {
 });
 
 
-// GET THREADS BY CATEGORY
+// GET THREADS BY CATEGORY (NOW WITH AUTHOR INFO)
 app.get("/threads/:category", async (req, res) => {
   try {
     const threads = await Threads.find({
@@ -692,14 +691,38 @@ app.get("/threads/:category", async (req, res) => {
     })
       .sort({ createdAt: -1 })
       .toArray();
-    res.json(threads);
+
+    // Collect author IDs
+    const ids = threads.map((t) => t.authorId);
+    const authors = await Users.find({ id: { $in: ids } }).toArray();
+    const map = new Map(authors.map((u) => [u.id, u]));
+
+    // Attach author objects to each thread
+    const result = threads.map((t) => {
+      const u = map.get(t.authorId);
+      return {
+        ...t,
+        author: u
+          ? {
+              id: u.id,
+              username: u.username,
+              role: u.role,
+              staffTag: u.staffTag || null,
+              staffIcon: u.staffIcon || null,
+            }
+          : null,
+      };
+    });
+
+    res.json(result);
   } catch (err) {
     console.error("❌ Fetch Threads Error:", err);
     res.status(500).json({ error: "Failed to fetch threads" });
   }
 });
 
-// GET SINGLE THREAD + REPLIES (includes author info for tags)
+
+// GET SINGLE THREAD + ALL REPLIES WITH AUTHOR DATA
 app.get("/thread/:id", async (req, res) => {
   try {
     const thread = await Threads.findOne({ id: req.params.id });
@@ -709,19 +732,16 @@ app.get("/thread/:id", async (req, res) => {
       .sort({ createdAt: 1 })
       .toArray();
 
-    // attach minimal author info for thread + replies
-    const userIds = [
-      thread.authorId,
-      ...replies.map((r) => r.authorId),
-    ].filter(Boolean);
-    const uniqueUserIds = [...new Set(userIds)];
-    const authors = await Users.find({ id: { $in: uniqueUserIds } }).toArray();
-    const authorMap = new Map(authors.map((u) => [u.id, u]));
+    const ids = [thread.authorId, ...replies.map((r) => r.authorId)].filter(
+      Boolean
+    );
+    const authors = await Users.find({ id: { $in: ids } }).toArray();
+    const map = new Map(authors.map((u) => [u.id, u]));
 
     const threadWithAuthor = {
       ...thread,
       author: (() => {
-        const u = authorMap.get(thread.authorId);
+        const u = map.get(thread.authorId);
         if (!u) return null;
         return {
           id: u.id,
@@ -734,7 +754,7 @@ app.get("/thread/:id", async (req, res) => {
     };
 
     const repliesWithAuthors = replies.map((r) => {
-      const u = authorMap.get(r.authorId);
+      const u = map.get(r.authorId);
       return {
         ...r,
         author: u
@@ -756,7 +776,8 @@ app.get("/thread/:id", async (req, res) => {
   }
 });
 
-// CREATE REPLY (requires accepted department)
+
+// CREATE REPLY (requires accepted department ONLY)
 app.post("/thread/:id/reply", async (req, res) => {
   try {
     const { userId, body } = req.body;
@@ -767,9 +788,10 @@ app.post("/thread/:id/reply", async (req, res) => {
     const user = await Users.findOne({ id: userId });
     if (!user) return res.status(401).json({ error: "Not logged in" });
 
-    const allowed = await userHasDepartment(user.email);
-    if (!allowed)
-      return res.status(403).json({ error: "Not authorized to reply" });
+    if (!(await userHasDepartment(user.email)))
+      return res
+        .status(403)
+        .json({ error: "You must be in a department to reply" });
 
     const reply = {
       id: crypto.randomUUID(),
@@ -789,21 +811,21 @@ app.post("/thread/:id/reply", async (req, res) => {
   }
 });
 
-// DELETE THREAD (staff only)
+
+// DELETE THREAD (STAFF ONLY)
 app.delete("/thread/:id", async (req, res) => {
   try {
     const { userId } = req.body;
     const user = await Users.findOne({ id: userId });
-    if (!user || !isStaff(user)) {
+
+    if (!user || !isStaff(user))
       return res.status(403).json({ error: "Staff only" });
-    }
 
     await Replies.deleteMany({ threadId: req.params.id });
     const result = await Threads.deleteOne({ id: req.params.id });
 
-    if (result.deletedCount === 0) {
+    if (result.deletedCount === 0)
       return res.status(404).json({ error: "Thread not found" });
-    }
 
     res.json({ success: true, message: "Thread deleted" });
   } catch (err) {
@@ -812,14 +834,15 @@ app.delete("/thread/:id", async (req, res) => {
   }
 });
 
-// DELETE REPLY (staff only)
+
+// DELETE REPLY (STAFF ONLY)
 app.delete("/reply/:id", async (req, res) => {
   try {
     const { userId } = req.body;
     const user = await Users.findOne({ id: userId });
-    if (!user || !isStaff(user)) {
+
+    if (!user || !isStaff(user))
       return res.status(403).json({ error: "Staff only" });
-    }
 
     const reply = await Replies.findOne({ id: req.params.id });
     if (!reply) return res.status(404).json({ error: "Reply not found" });
