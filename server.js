@@ -290,6 +290,24 @@ app.post("/appeals", async (req, res) => {
   }
 });
 
+/* ============================================
+   HEAD ADMIN PANEL AUTH
+============================================ */
+app.post("/ha-auth", (req, res) => {
+  const haPass = process.env.HEAD_ADMIN_PASSWORD;
+
+  if (!haPass) {
+    return res.status(500).json({ error: "HEAD_ADMIN_PASSWORD not set in environment" });
+  }
+
+  if (req.body.password === haPass) {
+    return res.json({ success: true });
+  }
+
+  return res.status(401).json({ error: "Invalid head admin password" });
+});
+
+
 /* ===========================
    USER FETCH BY ID (SESSION SYNC)
    =========================== */
