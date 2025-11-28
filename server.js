@@ -417,6 +417,23 @@ app.post("/users/update-password", async (req, res) => {
   }
 });
 
+// =============================
+// UPDATE BIO
+// =============================
+app.post("/users/update-bio", async (req, res) => {
+  try {
+    const { id, bio } = req.body;
+    if (!id) return res.status(400).json({ error: "Missing user ID" });
+
+    await Users.updateOne({ id }, { $set: { bio: bio || "" } });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Bio Update Error:", err);
+    res.status(500).json({ error: "Bio update failed" });
+  }
+});
+
+
 /* ===========================
    APPEALS – BANNED USERS ONLY
    =========================== */
