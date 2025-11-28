@@ -362,6 +362,20 @@ app.delete("/users/:id", async (req, res) => {
 });
 
 /* ===========================
+   GET ALL USERS (HA PANEL)
+   =========================== */
+app.get("/users", async (req, res) => {
+  try {
+    const users = await Users.find({}).toArray();
+    res.json(users);
+  } catch (err) {
+    console.error("❌ Users Fetch Error:", err);
+    res.status(500).json({ error: "Failed to fetch users" });
+  }
+});
+
+
+/* ===========================
    START SERVER
    =========================== */
 
