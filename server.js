@@ -656,9 +656,14 @@ app.post("/threads", async (req, res) => {
     const user = await Users.findOne({ id: userId });
     if (!user) return res.status(401).json({ error: "Not logged in" });
 
-    const allowed = await userHasDepartment(user.email);
+    // B OPTION ENFORCED HERE
+    const allowed =
+      (await userHasDepartment(user.email)) || isStaff(user);
+
     if (!allowed)
-      return res.status(403).json({ error: "Not authorized to post threads" });
+      return res.status(403).json({
+        error: "You must be a staff member or accepted into a department to post threads"
+      });
 
     const thread = {
       id: crypto.randomUUID(),
@@ -677,6 +682,7 @@ app.post("/threads", async (req, res) => {
     res.status(500).json({ error: "Failed to create thread" });
   }
 });
+
 
 // GET THREADS BY CATEGORY
 app.get("/threads/:category", async (req, res) => {
