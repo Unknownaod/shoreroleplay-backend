@@ -336,6 +336,30 @@ app.get("/users/:id", async (req, res) => {
   }
 });
 
+/* ===========================
+   DELETE USER ACCOUNT
+   =========================== */
+app.delete("/users/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    // Delete user
+    const userResult = await Users.deleteOne({ id });
+
+    // Also delete applications tied to that user
+    await Applications.deleteMany({ id });
+
+    if (userResult.deletedCount === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ success: true, message: "User and associated applications deleted" });
+
+  } catch (err) {
+    console.error("❌ User Delete Error:", err);
+    res.status(500).json({ error: "Failed to delete user" });
+  }
+});
 
 /* ===========================
    START SERVER
