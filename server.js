@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const cors = require("cors");
 
 const Brevo = require("@getbrevo/brevo");
@@ -45,6 +46,7 @@ if (HAS_BREVO_KEY) {
   console.warn("⚠️ BREVO_API_KEY missing — emails will be logged only");
 }
 
+
 /* ===========================
    DATABASE
    =========================== */
@@ -59,6 +61,22 @@ function readDB() {
 function writeDB(data) {
   fs.writeFileSync(dbFile, JSON.stringify(data, null, 2));
 }
+
+/* ===========================
+   USERS DATABASE
+   =========================== */
+
+const usersFile = path.join(__dirname, "users.json");
+
+function readUsers() {
+  if (!fs.existsSync(usersFile)) return [];
+  return JSON.parse(fs.readFileSync(usersFile, "utf8"));
+}
+
+function writeUsers(data) {
+  fs.writeFileSync(usersFile, JSON.stringify(data, null, 2));
+}
+
 
 /* ===========================
    EMAIL TEMPLATES
@@ -229,6 +247,82 @@ app.delete("/applications/:id", (req, res) => {
   } catch (err) {
     console.error("❌ Delete error:", err);
     res.status(500).json({ error: "Internal delete failure" });
+  }
+});
+
+
+/* ===========================
+   USER REGISTRATION
+   =========================== */
+
+app.post("/users/register", (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+
+    if (!username || username.trim().length < 3)
+      return res.status(400).json({ error: "Invalid username" });
+
+    if (!email || !email.includes("@"))
+      return res.status(400).json({ error: "Invalid email address" });
+
+    if (!password || password.length < 6)
+      return res.status(400).json({ error: "Password must be at least 6 characters" });
+
+    let users = readUsers();
+
+    if (users.some(u => u.email.toLowerCase() === email.toLowerCase()))
+      return res.status(409).json({ error: "Email already registered" });
+
+    const newUser = {
+      id: crypto.randomUUID(),
+      username: username.trim(),
+      email: email.toLowerCase().trim(),
+      password: password.trim(), // ⚠ plaintext for now
+      role: "user",
+      createdAt: new Date().toISOString()
+    };
+
+    users.push(newUser);
+    writeUsers(users);
+
+    console.log(`🟢 New user registered: ${username}`);
+    res.json({ success: true, message: "Account created" });
+
+  } catch (err) {
+    console.error("❌ Register Error:", err);
+    res.status(500).json({ error: "Internal registration failure" });
+  }
+});
+
+
+/* ===========================
+   USER LOGIN
+   =========================== */
+
+app.post("/users/login", (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password)
+      return res.status(400).json({ error: "Missing credentials" });
+
+    const users = readUsers();
+    const user = users.find(
+      u => u.email.toLowerCase() === email.toLowerCase() && u.password === password
+    );
+
+    if (!user)
+      return res.status(401).json({ error: "Invalid email or password" });
+
+    res.json({
+      success: true,
+      message: "Login successful",
+      user: { id: user.id, username: user.username, role: user.role }
+    });
+
+  } catch (err) {
+    console.error("❌ Login Error:", err);
+    res.status(500).json({ error: "Internal login failure" });
   }
 });
 
