@@ -291,6 +291,35 @@ app.post("/appeals", async (req, res) => {
 });
 
 /* ===========================
+   USER FETCH BY ID (SESSION SYNC)
+   =========================== */
+
+app.get("/users/:id", async (req, res) => {
+  try {
+    const user = await Users.findOne({ id: req.params.id });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      banned: !!user.banned,
+      banReason: user.banReason || null,
+      banDate: user.banDate || null,
+      createdAt: user.createdAt,
+    });
+  } catch (err) {
+    console.error("❌ User Fetch Error:", err);
+    res.status(500).json({ error: "Failed to fetch user" });
+  }
+});
+
+
+/* ===========================
    START SERVER
    =========================== */
 
