@@ -112,17 +112,41 @@ app.get("/", (req, res) => res.send("Shore Roleplay Backend Online 🚀"));
 
 // GET ALL APPLICATIONS
 app.get("/applications", async (req, res) => {
-  res.json(await Applications.find({}).toArray());
+  try {
+    const apps = await Applications.find({}).toArray();
+    res.json(apps);
+  } catch (err) {
+    console.error("❌ Get Applications Error:", err);
+    res.status(500).json({ error: "Failed to fetch applications" });
+  }
 });
 
 // STAFF AUTH (for staff panel password)
 app.post("/staff-auth", (req, res) => {
-  if (!process.env.STAFF_PANEL_PASSWORD)
+  if (!process.env.STAFF_PANEL_PASSWORD) {
     return res.status(500).json({ error: "Staff password not set" });
+  }
 
   req.body.password === process.env.STAFF_PANEL_PASSWORD
     ? res.json({ success: true })
     : res.status(401).json({ error: "Invalid password" });
+});
+
+/* ============================================
+   HEAD ADMIN PANEL AUTH (HA Panel)
+============================================ */
+app.post("/ha-auth", (req, res) => {
+  const haPass = process.env.HEAD_ADMIN_PASSWORD;
+
+  if (!haPass) {
+    return res.status(500).json({ error: "HEAD_ADMIN_PASSWORD not set in environment" });
+  }
+
+  if (req.body.password === haPass) {
+    return res.json({ success: true });
+  }
+
+  return res.status(401).json({ error: "Invalid head admin password" });
 });
 
 /* ===========================
@@ -138,8 +162,9 @@ app.post("/apply", async (req, res) => {
     if (!email || !email.includes("@")) return res.status(400).json({ error: "Invalid email" });
     if (!department) return res.status(400).json({ error: "Select a department" });
     if (!reason || reason.length < 100) return res.status(400).json({ error: "Reason too short" });
-    if (!agreedLogging || !agreedDiscord)
+    if (!agreedLogging || !agreedDiscord) {
       return res.status(400).json({ error: "Agreements required" });
+    }
 
     const exists = await Applications.findOne({ $or: [{ id }, { email }] });
     if (exists) return res.status(409).json({ error: "Application already exists" });
@@ -170,8 +195,9 @@ app.post("/apply", async (req, res) => {
 app.post("/applications/:id/decision", async (req, res) => {
   try {
     const { status } = req.body;
-    if (!["accepted", "denied"].includes(status))
+    if (!["accepted", "denied"].includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
+    }
 
     const appData = await Applications.findOne({ id: req.params.id });
     if (!appData) return res.status(404).json({ error: "Not found" });
@@ -191,10 +217,16 @@ app.post("/applications/:id/decision", async (req, res) => {
    =========================== */
 
 app.delete("/applications/:id", async (req, res) => {
-  const result = await Applications.deleteOne({ id: req.params.id });
-  result.deletedCount === 0
-    ? res.status(404).json({ error: "Not found" })
-    : res.json({ success: true, message: "Application deleted" });
+  try {
+    const result = await Applications.deleteOne({ id: req.params.id });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.json({ success: true, message: "Application deleted" });
+  } catch (err) {
+    console.error("❌ Delete Application Error:", err);
+    res.status(500).json({ error: "Failed to delete application" });
+  }
 });
 
 /* ===========================
@@ -221,6 +253,9 @@ app.post("/users/register", async (req, res) => {
       banReason: null,
       banDate: null,
       createdAt: new Date().toISOString(),
+      hwid: null,
+      lastIP: null,
+      lastLoginAt: null,
     });
 
     res.json({ success: true, message: "Account created" });
@@ -231,41 +266,102 @@ app.post("/users/register", async (req, res) => {
 });
 
 /* ===========================
-   USER LOGIN
+   USER LOGIN (tracks HWID/IP)
    =========================== */
 
 app.post("/users/login", async (req, res) => {
-  const { email, password, hwid } = req.body;
+  try {
+    const { email, password, hwid } = req.body;
 
-  const user = await Users.findOne({ email, password });
-  if (!user) return res.status(401).json({ error: "Invalid credentials" });
+    const user = await Users.findOne({ email, password });
+    if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
-  await Users.updateOne(
-    { id: user.id },
-    {
-      $set: {
-        lastLoginAt: new Date().toISOString(),
-        lastIP: req.headers["x-forwarded-for"] || req.ip,
-        hwid: hwid || user.hwid || null
+    const lastLoginAt = new Date().toISOString();
+    const lastIP = req.headers["x-forwarded-for"] || req.ip || null;
+
+    await Users.updateOne(
+      { id: user.id },
+      {
+        $set: {
+          lastLoginAt,
+          lastIP,
+          hwid: hwid || user.hwid || null,
+        },
       }
-    }
-  );
+    );
 
-  res.json({
-    success: true,
-    message: "Login OK",
-    user: {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      role: user.role,
-      banned: !!user.banned,
-      banReason: user.banReason || null,
-      banDate: user.banDate || null
-    },
-  });
+    res.json({
+      success: true,
+      message: "Login OK",
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        banned: !!user.banned,
+        banReason: user.banReason || null,
+        banDate: user.banDate || null,
+      },
+    });
+  } catch (err) {
+    console.error("❌ Login Error:", err);
+    res.status(500).json({ error: "Login failed" });
+  }
 });
 
+/* ===========================
+   CHANGE USERNAME
+   =========================== */
+
+app.post("/users/change-username", async (req, res) => {
+  try {
+    const { id, username } = req.body;
+    if (!id || !username || username.length < 3) {
+      return res.status(400).json({ error: "Invalid username change request" });
+    }
+
+    const result = await Users.updateOne(
+      { id },
+      { $set: { username } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ success: true, message: "Username updated" });
+  } catch (err) {
+    console.error("❌ Change Username Error:", err);
+    res.status(500).json({ error: "Failed to change username" });
+  }
+});
+
+/* ===========================
+   UPDATE PASSWORD
+   =========================== */
+
+app.post("/users/update-password", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password || password.length < 6) {
+      return res.status(400).json({ error: "Invalid password update request" });
+    }
+
+    const result = await Users.updateOne(
+      { email },
+      { $set: { password } } // ⚠ still plaintext
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ success: true, message: "Password updated" });
+  } catch (err) {
+    console.error("❌ Update Password Error:", err);
+    res.status(500).json({ error: "Failed to update password" });
+  }
+});
 
 /* ===========================
    APPEALS – BANNED USERS ONLY
@@ -301,26 +397,65 @@ app.post("/appeals", async (req, res) => {
   }
 });
 
-/* ============================================
-   HEAD ADMIN PANEL AUTH
-============================================ */
-app.post("/ha-auth", (req, res) => {
-  const haPass = process.env.HEAD_ADMIN_PASSWORD;
+/* ===========================
+   USER BAN / UNBAN (HA Panel)
+   =========================== */
 
-  if (!haPass) {
-    return res.status(500).json({ error: "HEAD_ADMIN_PASSWORD not set in environment" });
+app.post("/users/:id/ban", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const reason = req.body.reason || "Manual ban";
+
+    const result = await Users.updateOne(
+      { id },
+      {
+        $set: {
+          banned: true,
+          banReason: reason,
+          banDate: new Date().toISOString(),
+        },
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ success: true, message: "User banned" });
+  } catch (err) {
+    console.error("❌ Ban User Error:", err);
+    res.status(500).json({ error: "Failed to ban user" });
   }
-
-  if (req.body.password === haPass) {
-    return res.json({ success: true });
-  }
-
-  return res.status(401).json({ error: "Invalid head admin password" });
 });
 
+app.post("/users/:id/unban", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    const result = await Users.updateOne(
+      { id },
+      {
+        $set: {
+          banned: false,
+          banReason: null,
+          banDate: null,
+        },
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ success: true, message: "User unbanned" });
+  } catch (err) {
+    console.error("❌ Unban User Error:", err);
+    res.status(500).json({ error: "Failed to unban user" });
+  }
+});
 
 /* ===========================
-   USER FETCH BY ID (SESSION SYNC)
+   USER FETCH BY ID (SESSION / SETTINGS)
    =========================== */
 
 app.get("/users/:id", async (req, res) => {
@@ -340,6 +475,9 @@ app.get("/users/:id", async (req, res) => {
       banReason: user.banReason || null,
       banDate: user.banDate || null,
       createdAt: user.createdAt,
+      hwid: user.hwid || null,
+      lastIP: user.lastIP || null,
+      lastLoginAt: user.lastLoginAt || null,
     });
   } catch (err) {
     console.error("❌ User Fetch Error:", err);
@@ -350,14 +488,15 @@ app.get("/users/:id", async (req, res) => {
 /* ===========================
    DELETE USER ACCOUNT
    =========================== */
+
 app.delete("/users/:id", async (req, res) => {
   try {
     const id = req.params.id;
 
-    // Delete user
     const userResult = await Users.deleteOne({ id });
 
-    // Also delete applications tied to that user
+    // Also delete applications tied to that user ID if you store it that way.
+    // Adjust this if your Applications schema uses a different field name.
     await Applications.deleteMany({ id });
 
     if (userResult.deletedCount === 0) {
@@ -365,7 +504,6 @@ app.delete("/users/:id", async (req, res) => {
     }
 
     res.json({ success: true, message: "User and associated applications deleted" });
-
   } catch (err) {
     console.error("❌ User Delete Error:", err);
     res.status(500).json({ error: "Failed to delete user" });
@@ -375,6 +513,7 @@ app.delete("/users/:id", async (req, res) => {
 /* ===========================
    GET ALL USERS (HA PANEL)
    =========================== */
+
 app.get("/users", async (req, res) => {
   try {
     const users = await Users.find({}).toArray();
@@ -384,7 +523,6 @@ app.get("/users", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch users" });
   }
 });
-
 
 /* ===========================
    START SERVER
