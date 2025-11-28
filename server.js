@@ -230,8 +230,18 @@ app.post("/users/login", async (req, res) => {
   const user = await Users.findOne({ email: req.body.email, password: req.body.password });
   if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
-  res.json({ success: true, message: "Login OK", user: { id: user.id, username: user.username, role: user.role } });
+  res.json({
+    success: true,
+    message: "Login OK",
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role
+    }
+  });
 });
+
 
 /* ===========================
    START SERVER
