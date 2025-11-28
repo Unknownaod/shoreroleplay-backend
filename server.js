@@ -235,12 +235,22 @@ app.post("/users/register", async (req, res) => {
    =========================== */
 
 app.post("/users/login", async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, hwid } = req.body;
 
   const user = await Users.findOne({ email, password });
   if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
-  // Always return user object including ban data.
+  await Users.updateOne(
+    { id: user.id },
+    {
+      $set: {
+        lastLoginAt: new Date().toISOString(),
+        lastIP: req.headers["x-forwarded-for"] || req.ip,
+        hwid: hwid || user.hwid || null
+      }
+    }
+  );
+
   res.json({
     success: true,
     message: "Login OK",
@@ -251,10 +261,11 @@ app.post("/users/login", async (req, res) => {
       role: user.role,
       banned: !!user.banned,
       banReason: user.banReason || null,
-      banDate: user.banDate || null,
+      banDate: user.banDate || null
     },
   });
 });
+
 
 /* ===========================
    APPEALS – BANNED USERS ONLY
