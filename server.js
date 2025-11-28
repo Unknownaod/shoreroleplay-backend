@@ -17,6 +17,17 @@ const FROM_NAME = process.env.FROM_NAME || "Shore Roleplay";
 const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@shoreroleplay.xyz";
 const HAS_BREVO_KEY = !!process.env.BREVO_API_KEY;
 
+// staff roles used for forums + moderation
+const STAFF_ROLES = [
+  "Head Administrator",
+  "Internal Affairs",
+  "Administration",
+  "Junior Administration",
+  "Senior Staff",
+  "Staff",
+  "Staff In Training",
+];
+
 /* ===========================
    BREVO INITIALIZATION
    =========================== */
@@ -47,7 +58,7 @@ if (!process.env.MONGO_URI) {
 }
 
 const client = new MongoClient(process.env.MONGO_URI);
-let db, Applications, Users, Appeals;
+let db, Applications, Users, Appeals, Threads, Replies;
 
 async function initDB() {
   await client.connect();
@@ -55,23 +66,53 @@ async function initDB() {
   Applications = db.collection("applications");
   Users = db.collection("users");
   Appeals = db.collection("appeals");
+  Threads = db.collection("threads");
+  Replies = db.collection("replies");
   console.log("📦 MongoDB connected");
 }
 
-initDB().catch(err => {
+initDB().catch((err) => {
   console.error("❌ DB init error:", err);
   process.exit(1);
 });
+
+/* ===========================
+   HELPERS
+   =========================== */
+
+function getClientIP(req) {
+  const xf = req.headers["x-forwarded-for"];
+  if (typeof xf === "string" && xf.length > 0) {
+    // can be "ip, ip, ip"
+    return xf.split(",")[0].trim();
+  }
+  return req.ip || null;
+}
+
+// HWID generator (random hex)
+function generateHWID() {
+  return crypto.randomBytes(16).toString("hex");
+}
+
+// does this email have at least one accepted application?
+async function userHasDepartment(email) {
+  const apps = await Applications.find({
+    email,
+    status: "accepted",
+  }).toArray();
+  return apps.length > 0;
+}
+
+function isStaff(user) {
+  if (!user) return false;
+  return STAFF_ROLES.includes(user.role);
+}
 
 /* ===========================
    EMAIL TEMPLATES
    =========================== */
 
 const { acceptedEmail, deniedEmail } = require("./emailTemplates");
-
-/* ===========================
-   EMAIL SENDER
-   =========================== */
 
 async function sendDecisionEmail(status, user) {
   const html =
@@ -110,17 +151,6 @@ async function sendDecisionEmail(status, user) {
 // HEALTH CHECK
 app.get("/", (req, res) => res.send("Shore Roleplay Backend Online 🚀"));
 
-// GET ALL APPLICATIONS
-app.get("/applications", async (req, res) => {
-  try {
-    const apps = await Applications.find({}).toArray();
-    res.json(apps);
-  } catch (err) {
-    console.error("❌ Get Applications Error:", err);
-    res.status(500).json({ error: "Failed to fetch applications" });
-  }
-});
-
 // STAFF AUTH (for staff panel password)
 app.post("/staff-auth", (req, res) => {
   if (!process.env.STAFF_PANEL_PASSWORD) {
@@ -139,7 +169,9 @@ app.post("/ha-auth", (req, res) => {
   const haPass = process.env.HEAD_ADMIN_PASSWORD;
 
   if (!haPass) {
-    return res.status(500).json({ error: "HEAD_ADMIN_PASSWORD not set in environment" });
+    return res
+      .status(500)
+      .json({ error: "HEAD_ADMIN_PASSWORD not set in environment" });
   }
 
   if (req.body.password === haPass) {
@@ -150,18 +182,43 @@ app.post("/ha-auth", (req, res) => {
 });
 
 /* ===========================
-   APPLICATION SUBMISSION
+   APPLICATIONS
    =========================== */
 
+// GET ALL APPLICATIONS
+app.get("/applications", async (req, res) => {
+  try {
+    const apps = await Applications.find({}).toArray();
+    res.json(apps);
+  } catch (err) {
+    console.error("❌ Get Applications Error:", err);
+    res.status(500).json({ error: "Failed to fetch applications" });
+  }
+});
+
+// SUBMIT APPLICATION
 app.post("/apply", async (req, res) => {
   try {
-    const { id, username, email, department, reason, agreedLogging, agreedDiscord } = req.body;
+    const {
+      id,
+      username,
+      email,
+      department,
+      reason,
+      agreedLogging,
+      agreedDiscord,
+    } = req.body;
 
-    if (!id || typeof id !== "string") return res.status(400).json({ error: "Invalid ID" });
-    if (!username || username.length < 3) return res.status(400).json({ error: "Invalid username" });
-    if (!email || !email.includes("@")) return res.status(400).json({ error: "Invalid email" });
-    if (!department) return res.status(400).json({ error: "Select a department" });
-    if (!reason || reason.length < 100) return res.status(400).json({ error: "Reason too short" });
+    if (!id || typeof id !== "string")
+      return res.status(400).json({ error: "Invalid ID" });
+    if (!username || username.length < 3)
+      return res.status(400).json({ error: "Invalid username" });
+    if (!email || !email.includes("@"))
+      return res.status(400).json({ error: "Invalid email" });
+    if (!department)
+      return res.status(400).json({ error: "Select a department" });
+    if (!reason || reason.length < 100)
+      return res.status(400).json({ error: "Reason too short" });
     if (!agreedLogging || !agreedDiscord) {
       return res.status(400).json({ error: "Agreements required" });
     }
@@ -188,10 +245,7 @@ app.post("/apply", async (req, res) => {
   }
 });
 
-/* ===========================
-   APPLICATION DECISION
-   =========================== */
-
+// APPLICATION DECISION
 app.post("/applications/:id/decision", async (req, res) => {
   try {
     const { status } = req.body;
@@ -212,10 +266,7 @@ app.post("/applications/:id/decision", async (req, res) => {
   }
 });
 
-/* ===========================
-   DELETE APPLICATION
-   =========================== */
-
+// DELETE APPLICATION
 app.delete("/applications/:id", async (req, res) => {
   try {
     const result = await Applications.deleteOne({ id: req.params.id });
@@ -230,18 +281,25 @@ app.delete("/applications/:id", async (req, res) => {
 });
 
 /* ===========================
-   USER REGISTRATION
+   USERS – REGISTRATION / LOGIN
    =========================== */
 
+// USER REGISTRATION
 app.post("/users/register", async (req, res) => {
   try {
     const { username, email, password } = req.body;
-    if (!username || username.length < 3) return res.status(400).json({ error: "Bad username" });
-    if (!email || !email.includes("@")) return res.status(400).json({ error: "Bad email" });
-    if (!password || password.length < 6) return res.status(400).json({ error: "Bad password" });
+    if (!username || username.length < 3)
+      return res.status(400).json({ error: "Bad username" });
+    if (!email || !email.includes("@"))
+      return res.status(400).json({ error: "Bad email" });
+    if (!password || password.length < 6)
+      return res.status(400).json({ error: "Bad password" });
 
     const exists = await Users.findOne({ email });
     if (exists) return res.status(409).json({ error: "Email used" });
+
+    const hwid = generateHWID();
+    const registrationIP = getClientIP(req);
 
     await Users.insertOne({
       id: crypto.randomUUID(),
@@ -249,12 +307,14 @@ app.post("/users/register", async (req, res) => {
       email,
       password, // ⚠ plaintext for now
       role: "user",
+      staffTag: null,
+      staffIcon: null,
       banned: false,
       banReason: null,
       banDate: null,
       createdAt: new Date().toISOString(),
-      hwid: null,
-      lastIP: null,
+      hwid,
+      lastIP: registrationIP,
       lastLoginAt: null,
     });
 
@@ -265,10 +325,7 @@ app.post("/users/register", async (req, res) => {
   }
 });
 
-/* ===========================
-   USER LOGIN (tracks HWID/IP)
-   =========================== */
-
+// USER LOGIN (tracks HWID/IP)
 app.post("/users/login", async (req, res) => {
   try {
     const { email, password, hwid } = req.body;
@@ -277,7 +334,7 @@ app.post("/users/login", async (req, res) => {
     if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
     const lastLoginAt = new Date().toISOString();
-    const lastIP = req.headers["x-forwarded-for"] || req.ip || null;
+    const lastIP = getClientIP(req);
 
     await Users.updateOne(
       { id: user.id },
@@ -285,7 +342,7 @@ app.post("/users/login", async (req, res) => {
         $set: {
           lastLoginAt,
           lastIP,
-          hwid: hwid || user.hwid || null,
+          hwid: hwid || user.hwid || generateHWID(),
         },
       }
     );
@@ -298,6 +355,8 @@ app.post("/users/login", async (req, res) => {
         username: user.username,
         email: user.email,
         role: user.role,
+        staffTag: user.staffTag || null,
+        staffIcon: user.staffIcon || null,
         banned: !!user.banned,
         banReason: user.banReason || null,
         banDate: user.banDate || null,
@@ -310,9 +369,10 @@ app.post("/users/login", async (req, res) => {
 });
 
 /* ===========================
-   CHANGE USERNAME
+   USER PROFILE / SECURITY
    =========================== */
 
+// CHANGE USERNAME
 app.post("/users/change-username", async (req, res) => {
   try {
     const { id, username } = req.body;
@@ -320,10 +380,7 @@ app.post("/users/change-username", async (req, res) => {
       return res.status(400).json({ error: "Invalid username change request" });
     }
 
-    const result = await Users.updateOne(
-      { id },
-      { $set: { username } }
-    );
+    const result = await Users.updateOne({ id }, { $set: { username } });
 
     if (result.matchedCount === 0) {
       return res.status(404).json({ error: "User not found" });
@@ -336,10 +393,7 @@ app.post("/users/change-username", async (req, res) => {
   }
 });
 
-/* ===========================
-   UPDATE PASSWORD
-   =========================== */
-
+// UPDATE PASSWORD
 app.post("/users/update-password", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -375,10 +429,11 @@ app.post("/appeals", async (req, res) => {
       return res.status(400).json({ error: "Invalid appeal" });
     }
 
-    // Verify user exists and is banned
     const user = await Users.findOne({ id: userId, username });
     if (!user || !user.banned) {
-      return res.status(403).json({ error: "Appeals allowed only for banned accounts" });
+      return res
+        .status(403)
+        .json({ error: "Appeals allowed only for banned accounts" });
     }
 
     await Appeals.insertOne({
@@ -398,9 +453,10 @@ app.post("/appeals", async (req, res) => {
 });
 
 /* ===========================
-   USER BAN / UNBAN (HA Panel)
+   USER ADMIN (BAN / UNBAN / ROLE / DELETE)
    =========================== */
 
+// BAN USER
 app.post("/users/:id/ban", async (req, res) => {
   try {
     const id = req.params.id;
@@ -428,6 +484,7 @@ app.post("/users/:id/ban", async (req, res) => {
   }
 });
 
+// UNBAN USER
 app.post("/users/:id/unban", async (req, res) => {
   try {
     const id = req.params.id;
@@ -454,10 +511,34 @@ app.post("/users/:id/unban", async (req, res) => {
   }
 });
 
-/* ===========================
-   USER FETCH BY ID (SESSION / SETTINGS)
-   =========================== */
+// ASSIGN STAFF / ROLE + OPTIONAL TAG/ICON (for HA panel)
+app.post("/users/:id/role", async (req, res) => {
+  try {
+    const { role, staffTag, staffIcon } = req.body;
 
+    const update = {
+      role: role || "user",
+      staffTag: staffTag || null,
+      staffIcon: staffIcon || null,
+    };
+
+    const result = await Users.updateOne(
+      { id: req.params.id },
+      { $set: update }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ success: true, message: "Role updated" });
+  } catch (err) {
+    console.error("❌ Role Update Error:", err);
+    res.status(500).json({ error: "Failed to update role" });
+  }
+});
+
+// FETCH USER BY ID (SESSION / SETTINGS)
 app.get("/users/:id", async (req, res) => {
   try {
     const user = await Users.findOne({ id: req.params.id });
@@ -471,6 +552,8 @@ app.get("/users/:id", async (req, res) => {
       username: user.username,
       email: user.email,
       role: user.role,
+      staffTag: user.staffTag || null,
+      staffIcon: user.staffIcon || null,
       banned: !!user.banned,
       banReason: user.banReason || null,
       banDate: user.banDate || null,
@@ -485,19 +568,14 @@ app.get("/users/:id", async (req, res) => {
   }
 });
 
-/* ===========================
-   DELETE USER ACCOUNT
-   =========================== */
-
+// DELETE USER + THEIR APPLICATIONS
 app.delete("/users/:id", async (req, res) => {
   try {
     const id = req.params.id;
 
     const userResult = await Users.deleteOne({ id });
 
-    // Also delete applications tied to that user ID if you store it that way.
-    // Adjust this if your Applications schema uses a different field name.
-    await Applications.deleteMany({ id });
+    await Applications.deleteMany({ id }); // if applications store the user id too
 
     if (userResult.deletedCount === 0) {
       return res.status(404).json({ error: "User not found" });
@@ -510,10 +588,7 @@ app.delete("/users/:id", async (req, res) => {
   }
 });
 
-/* ===========================
-   GET ALL USERS (HA PANEL)
-   =========================== */
-
+// GET ALL USERS (HA PANEL)
 app.get("/users", async (req, res) => {
   try {
     const users = await Users.find({}).toArray();
@@ -521,6 +596,198 @@ app.get("/users", async (req, res) => {
   } catch (err) {
     console.error("❌ Users Fetch Error:", err);
     res.status(500).json({ error: "Failed to fetch users" });
+  }
+});
+
+/* ===========================
+   FORUM: THREADS & REPLIES
+   =========================== */
+
+// CREATE THREAD (requires accepted department)
+app.post("/threads", async (req, res) => {
+  try {
+    const { title, body, category, userId } = req.body;
+
+    if (!title || title.length < 4)
+      return res.status(400).json({ error: "Title too short" });
+    if (!body || body.length < 10)
+      return res.status(400).json({ error: "Body too short" });
+
+    const user = await Users.findOne({ id: userId });
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+
+    const allowed = await userHasDepartment(user.email);
+    if (!allowed)
+      return res.status(403).json({ error: "Not authorized to post threads" });
+
+    const thread = {
+      id: crypto.randomUUID(),
+      title,
+      body,
+      category: category || "general",
+      authorId: user.id,
+      createdAt: new Date().toISOString(),
+      replies: 0,
+    };
+
+    await Threads.insertOne(thread);
+    res.json({ success: true, thread });
+  } catch (err) {
+    console.error("❌ Create Thread Error:", err);
+    res.status(500).json({ error: "Failed to create thread" });
+  }
+});
+
+// GET THREADS BY CATEGORY
+app.get("/threads/:category", async (req, res) => {
+  try {
+    const threads = await Threads.find({
+      category: req.params.category,
+    })
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.json(threads);
+  } catch (err) {
+    console.error("❌ Fetch Threads Error:", err);
+    res.status(500).json({ error: "Failed to fetch threads" });
+  }
+});
+
+// GET SINGLE THREAD + REPLIES (includes author info for tags)
+app.get("/thread/:id", async (req, res) => {
+  try {
+    const thread = await Threads.findOne({ id: req.params.id });
+    if (!thread) return res.status(404).json({ error: "Thread not found" });
+
+    const replies = await Replies.find({ threadId: req.params.id })
+      .sort({ createdAt: 1 })
+      .toArray();
+
+    // attach minimal author info for thread + replies
+    const userIds = [
+      thread.authorId,
+      ...replies.map((r) => r.authorId),
+    ].filter(Boolean);
+    const uniqueUserIds = [...new Set(userIds)];
+    const authors = await Users.find({ id: { $in: uniqueUserIds } }).toArray();
+    const authorMap = new Map(authors.map((u) => [u.id, u]));
+
+    const threadWithAuthor = {
+      ...thread,
+      author: (() => {
+        const u = authorMap.get(thread.authorId);
+        if (!u) return null;
+        return {
+          id: u.id,
+          username: u.username,
+          role: u.role,
+          staffTag: u.staffTag || null,
+          staffIcon: u.staffIcon || null,
+        };
+      })(),
+    };
+
+    const repliesWithAuthors = replies.map((r) => {
+      const u = authorMap.get(r.authorId);
+      return {
+        ...r,
+        author: u
+          ? {
+              id: u.id,
+              username: u.username,
+              role: u.role,
+              staffTag: u.staffTag || null,
+              staffIcon: u.staffIcon || null,
+            }
+          : null,
+      };
+    });
+
+    res.json({ thread: threadWithAuthor, replies: repliesWithAuthors });
+  } catch (err) {
+    console.error("❌ Fetch Thread Error:", err);
+    res.status(500).json({ error: "Failed to fetch thread" });
+  }
+});
+
+// CREATE REPLY (requires accepted department)
+app.post("/thread/:id/reply", async (req, res) => {
+  try {
+    const { userId, body } = req.body;
+
+    if (!body || body.length < 2)
+      return res.status(400).json({ error: "Reply too short" });
+
+    const user = await Users.findOne({ id: userId });
+    if (!user) return res.status(401).json({ error: "Not logged in" });
+
+    const allowed = await userHasDepartment(user.email);
+    if (!allowed)
+      return res.status(403).json({ error: "Not authorized to reply" });
+
+    const reply = {
+      id: crypto.randomUUID(),
+      threadId: req.params.id,
+      authorId: user.id,
+      body,
+      createdAt: new Date().toISOString(),
+    };
+
+    await Replies.insertOne(reply);
+    await Threads.updateOne({ id: req.params.id }, { $inc: { replies: 1 } });
+
+    res.json({ success: true, reply });
+  } catch (err) {
+    console.error("❌ Create Reply Error:", err);
+    res.status(500).json({ error: "Failed to create reply" });
+  }
+});
+
+// DELETE THREAD (staff only)
+app.delete("/thread/:id", async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const user = await Users.findOne({ id: userId });
+    if (!user || !isStaff(user)) {
+      return res.status(403).json({ error: "Staff only" });
+    }
+
+    await Replies.deleteMany({ threadId: req.params.id });
+    const result = await Threads.deleteOne({ id: req.params.id });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: "Thread not found" });
+    }
+
+    res.json({ success: true, message: "Thread deleted" });
+  } catch (err) {
+    console.error("❌ Delete Thread Error:", err);
+    res.status(500).json({ error: "Failed to delete thread" });
+  }
+});
+
+// DELETE REPLY (staff only)
+app.delete("/reply/:id", async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const user = await Users.findOne({ id: userId });
+    if (!user || !isStaff(user)) {
+      return res.status(403).json({ error: "Staff only" });
+    }
+
+    const reply = await Replies.findOne({ id: req.params.id });
+    if (!reply) return res.status(404).json({ error: "Reply not found" });
+
+    await Replies.deleteOne({ id: req.params.id });
+    await Threads.updateOne(
+      { id: reply.threadId },
+      { $inc: { replies: -1 } }
+    );
+
+    res.json({ success: true, message: "Reply deleted" });
+  } catch (err) {
+    console.error("❌ Delete Reply Error:", err);
+    res.status(500).json({ error: "Failed to delete reply" });
   }
 });
 
