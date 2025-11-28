@@ -9,9 +9,6 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Trust proxy so req.ip works correctly behind Render / reverse proxies
-app.set("trust proxy", true);
-
 /* ===========================
    CONSTANTS
    =========================== */
@@ -50,18 +47,19 @@ if (!process.env.MONGO_URI) {
 }
 
 const client = new MongoClient(process.env.MONGO_URI);
-let db, Applications, Users;
+let db, Applications, Users, Appeals;
 
 async function initDB() {
   await client.connect();
   db = client.db("shoreRoleplay");
   Applications = db.collection("applications");
   Users = db.collection("users");
+  Appeals = db.collection("appeals");
   console.log("📦 MongoDB connected");
 }
 
-initDB().catch((err) => {
-  console.error("❌ Mongo init error:", err);
+initDB().catch(err => {
+  console.error("❌ DB init error:", err);
   process.exit(1);
 });
 
@@ -106,99 +104,45 @@ async function sendDecisionEmail(status, user) {
 }
 
 /* ===========================
-   HELPERS
-   =========================== */
-
-function sanitizeUser(user) {
-  if (!user) return null;
-  return {
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    role: user.role,
-    hwid: user.hwid,
-    banned: !!user.banned,
-    lastIP: user.lastIP || null,
-    createdAt: user.createdAt || null,
-    lastLoginAt: user.lastLoginAt || null,
-  };
-}
-
-/* ===========================
-   ROUTES
+   ROUTES – BASIC
    =========================== */
 
 // HEALTH CHECK
 app.get("/", (req, res) => res.send("Shore Roleplay Backend Online 🚀"));
 
-/* ===========================
-   APPLICATION ROUTES
-   =========================== */
-
 // GET ALL APPLICATIONS
 app.get("/applications", async (req, res) => {
-  try {
-    const apps = await Applications.find({}).toArray();
-    res.json(apps);
-  } catch (err) {
-    console.error("❌ /applications error:", err);
-    res.status(500).json({ error: "Internal error" });
-  }
+  res.json(await Applications.find({}).toArray());
 });
 
-// STAFF AUTH (for main staff panel)
+// STAFF AUTH (for staff panel password)
 app.post("/staff-auth", (req, res) => {
   if (!process.env.STAFF_PANEL_PASSWORD)
     return res.status(500).json({ error: "Staff password not set" });
 
-  if (req.body.password === process.env.STAFF_PANEL_PASSWORD) {
-    return res.json({ success: true });
-  }
-  return res.status(401).json({ error: "Invalid password" });
+  req.body.password === process.env.STAFF_PANEL_PASSWORD
+    ? res.json({ success: true })
+    : res.status(401).json({ error: "Invalid password" });
 });
 
-// HA AUTH (for HA tab)
-app.post("/staff-ha-auth", (req, res) => {
-  if (!process.env.STAFF_HA_PASSWORD) {
-    return res.status(500).json({ error: "HA password not set" });
-  }
-  if (req.body.password === process.env.STAFF_HA_PASSWORD) {
-    return res.json({ success: true });
-  }
-  return res.status(401).json({ error: "Invalid HA password" });
-});
+/* ===========================
+   APPLICATION SUBMISSION
+   =========================== */
 
-/* APPLICATION SUBMISSION */
 app.post("/apply", async (req, res) => {
   try {
-    const {
-      id,
-      username,
-      email,
-      department,
-      reason,
-      agreedLogging,
-      agreedDiscord,
-    } = req.body;
+    const { id, username, email, department, reason, agreedLogging, agreedDiscord } = req.body;
 
-    if (!id || typeof id !== "string")
-      return res.status(400).json({ error: "Invalid ID" });
-    if (!username || username.length < 3)
-      return res.status(400).json({ error: "Invalid username" });
-    if (!email || !email.includes("@"))
-      return res.status(400).json({ error: "Invalid email" });
-    if (!department)
-      return res.status(400).json({ error: "Select a department" });
-    if (!reason || reason.length < 100)
-      return res.status(400).json({ error: "Reason too short" });
+    if (!id || typeof id !== "string") return res.status(400).json({ error: "Invalid ID" });
+    if (!username || username.length < 3) return res.status(400).json({ error: "Invalid username" });
+    if (!email || !email.includes("@")) return res.status(400).json({ error: "Invalid email" });
+    if (!department) return res.status(400).json({ error: "Select a department" });
+    if (!reason || reason.length < 100) return res.status(400).json({ error: "Reason too short" });
     if (!agreedLogging || !agreedDiscord)
       return res.status(400).json({ error: "Agreements required" });
 
-    const exists = await Applications.findOne({
-      $or: [{ id }, { email }],
-    });
-    if (exists)
-      return res.status(409).json({ error: "Application already exists" });
+    const exists = await Applications.findOne({ $or: [{ id }, { email }] });
+    if (exists) return res.status(409).json({ error: "Application already exists" });
 
     await Applications.insertOne({
       id,
@@ -219,7 +163,10 @@ app.post("/apply", async (req, res) => {
   }
 });
 
-/* APPLICATION DECISION */
+/* ===========================
+   APPLICATION DECISION
+   =========================== */
+
 app.post("/applications/:id/decision", async (req, res) => {
   try {
     const { status } = req.body;
@@ -229,64 +176,51 @@ app.post("/applications/:id/decision", async (req, res) => {
     const appData = await Applications.findOne({ id: req.params.id });
     if (!appData) return res.status(404).json({ error: "Not found" });
 
-    await Applications.updateOne(
-      { id: req.params.id },
-      { $set: { status } }
-    );
+    await Applications.updateOne({ id: req.params.id }, { $set: { status } });
     await sendDecisionEmail(status, appData);
 
     res.json({ success: true });
   } catch (err) {
     console.error("❌ Decision Error:", err);
-    res.status(500).json({ error: "Decision processing failed" });
-  }
-});
-
-/* DELETE APPLICATION */
-app.delete("/applications/:id", async (req, res) => {
-  try {
-    const result = await Applications.deleteOne({ id: req.params.id });
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ error: "Not found" });
-    }
-    res.json({ success: true, message: "Application deleted" });
-  } catch (err) {
-    console.error("❌ Delete application error:", err);
-    res.status(500).json({ error: "Internal error" });
+    res.status(500).json({ error: "Decision email failed" });
   }
 });
 
 /* ===========================
-   USER ROUTES
+   DELETE APPLICATION
    =========================== */
 
-/* USER REGISTRATION */
+app.delete("/applications/:id", async (req, res) => {
+  const result = await Applications.deleteOne({ id: req.params.id });
+  result.deletedCount === 0
+    ? res.status(404).json({ error: "Not found" })
+    : res.json({ success: true, message: "Application deleted" });
+});
+
+/* ===========================
+   USER REGISTRATION
+   =========================== */
+
 app.post("/users/register", async (req, res) => {
   try {
     const { username, email, password } = req.body;
-    if (!username || username.length < 3)
-      return res.status(400).json({ error: "Bad username" });
-    if (!email || !email.includes("@"))
-      return res.status(400).json({ error: "Bad email" });
-    if (!password || password.length < 6)
-      return res.status(400).json({ error: "Bad password" });
+    if (!username || username.length < 3) return res.status(400).json({ error: "Bad username" });
+    if (!email || !email.includes("@")) return res.status(400).json({ error: "Bad email" });
+    if (!password || password.length < 6) return res.status(400).json({ error: "Bad password" });
 
     const exists = await Users.findOne({ email });
     if (exists) return res.status(409).json({ error: "Email used" });
-
-    const now = new Date().toISOString();
 
     await Users.insertOne({
       id: crypto.randomUUID(),
       username,
       email,
-      password, // TODO: hash later
+      password, // ⚠ plaintext for now
       role: "user",
-      hwid: crypto.randomUUID(), // "hardware id" for banning
       banned: false,
-      createdAt: now,
-      lastLoginAt: null,
-      lastIP: null,
+      banReason: null,
+      banDate: null,
+      createdAt: new Date().toISOString(),
     });
 
     res.json({ success: true, message: "Account created" });
@@ -296,97 +230,63 @@ app.post("/users/register", async (req, res) => {
   }
 });
 
-/* USER LOGIN (capture IP + check banned) */
+/* ===========================
+   USER LOGIN
+   =========================== */
+
 app.post("/users/login", async (req, res) => {
+  const { email, password } = req.body;
+
+  const user = await Users.findOne({ email, password });
+  if (!user) return res.status(401).json({ error: "Invalid credentials" });
+
+  // Always return user object including ban data.
+  res.json({
+    success: true,
+    message: "Login OK",
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      banned: !!user.banned,
+      banReason: user.banReason || null,
+      banDate: user.banDate || null,
+    },
+  });
+});
+
+/* ===========================
+   APPEALS – BANNED USERS ONLY
+   =========================== */
+
+app.post("/appeals", async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const user = await Users.findOne({ email, password });
+    const { userId, username, reason } = req.body;
 
-    if (!user) return res.status(401).json({ error: "Invalid credentials" });
-    if (user.banned)
-      return res.status(403).json({ error: "Account is banned" });
+    if (!userId || !username || !reason || reason.length < 20) {
+      return res.status(400).json({ error: "Invalid appeal" });
+    }
 
-    const now = new Date().toISOString();
-    const ip = req.ip;
+    // Verify user exists and is banned
+    const user = await Users.findOne({ id: userId, username });
+    if (!user || !user.banned) {
+      return res.status(403).json({ error: "Appeals allowed only for banned accounts" });
+    }
 
-    await Users.updateOne(
-      { _id: user._id },
-      { $set: { lastIP: ip, lastLoginAt: now } }
-    );
-
-    // reflect updates in the object we're returning
-    user.lastIP = ip;
-    user.lastLoginAt = now;
-
-    res.json({
-      success: true,
-      message: "Login OK",
-      user: sanitizeUser(user),
+    await Appeals.insertOne({
+      id: crypto.randomUUID(),
+      userId,
+      username,
+      reason,
+      createdAt: new Date().toISOString(),
+      status: "pending",
     });
+
+    res.json({ success: true, message: "Appeal submitted" });
   } catch (err) {
-    console.error("❌ Login Error:", err);
-    res.status(500).json({ error: "Login failed" });
-  }
-});
-
-/* HA: GET ALL USERS (for HA tab) */
-app.get("/users", async (req, res) => {
-  try {
-    const raw = await Users.find({}, { projection: { password: 0 } }).toArray();
-    res.json(raw.map(sanitizeUser));
-  } catch (err) {
-    console.error("❌ /users list error:", err);
-    res.status(500).json({ error: "Internal error" });
-  }
-});
-
-/* HA: BAN USER (flag) */
-app.post("/users/:id/ban", async (req, res) => {
-  try {
-    const result = await Users.updateOne(
-      { id: req.params.id },
-      { $set: { banned: true } }
-    );
-    if (result.matchedCount === 0)
-      return res.status(404).json({ error: "User not found" });
-    res.json({ success: true });
-  } catch (err) {
-    console.error("❌ Ban user error:", err);
-    res.status(500).json({ error: "Internal error" });
-  }
-});
-
-/* HA: UNBAN USER */
-app.post("/users/:id/unban", async (req, res) => {
-  try {
-    const result = await Users.updateOne(
-      { id: req.params.id },
-      { $set: { banned: false } }
-    );
-    if (result.matchedCount === 0)
-      return res.status(404).json({ error: "User not found" });
-    res.json({ success: true });
-  } catch (err) {
-    console.error("❌ Unban user error:", err);
-    res.status(500).json({ error: "Internal error" });
-  }
-});
-
-/* HA: DELETE USER (and optionally their apps) */
-app.delete("/users/:id", async (req, res) => {
-  try {
-    const user = await Users.findOne({ id: req.params.id });
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    await Users.deleteOne({ id: req.params.id });
-
-    // Optional: also delete all applications from this email
-    await Applications.deleteMany({ email: user.email });
-
-    res.json({ success: true, message: "User (and apps) deleted" });
-  } catch (err) {
-    console.error("❌ Delete user error:", err);
-    res.status(500).json({ error: "Internal error" });
+    console.error("❌ Appeal Error:", err);
+    res.status(500).json({ error: "Appeal failed" });
   }
 });
 
