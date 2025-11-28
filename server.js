@@ -360,6 +360,8 @@ app.post("/users/login", async (req, res) => {
         banned: !!user.banned,
         banReason: user.banReason || null,
         banDate: user.banDate || null,
+        bio: user.bio || "",
+        pfp: user.pfp || null,
       },
     });
   } catch (err) {
