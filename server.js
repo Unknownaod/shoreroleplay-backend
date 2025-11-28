@@ -434,19 +434,25 @@ app.post("/users/update-password", async (req, res) => {
   }
 });
 
-// =============================
-// UPDATE BIO
-// =============================
-app.post("/users/update-bio", async (req, res) => {
+// UPDATE USER PROFILE (BIO + PFP)
+app.post("/users/update", async (req, res) => {
   try {
-    const { id, bio } = req.body;
+    const { id, bio, pfp } = req.body;
     if (!id) return res.status(400).json({ error: "Missing user ID" });
 
-    await Users.updateOne({ id }, { $set: { bio: bio || "" } });
-    res.json({ success: true });
+    const update = {};
+    if (bio !== undefined) update.bio = bio;
+    if (pfp !== undefined) update.pfp = pfp;
+
+    const result = await Users.updateOne({ id }, { $set: update });
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ success: true, message: "Profile updated" });
   } catch (err) {
-    console.error("❌ Bio Update Error:", err);
-    res.status(500).json({ error: "Bio update failed" });
+    console.error("❌ User Update Error:", err);
+    res.status(500).json({ error: "Update failed" });
   }
 });
 
