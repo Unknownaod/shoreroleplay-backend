@@ -1,11 +1,9 @@
 require("dotenv").config();
 const express = require("express");
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
 const cors = require("cors");
-
+const crypto = require("crypto");
 const Brevo = require("@getbrevo/brevo");
+const { MongoClient, ObjectId } = require("mongodb");
 
 const app = express();
 app.use(express.json());
@@ -20,63 +18,46 @@ const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@shoreroleplay.xyz";
 const HAS_BREVO_KEY = !!process.env.BREVO_API_KEY;
 
 /* ===========================
-   BREVO INITIALIZATION (FIXED)
+   BREVO INITIALIZATION
    =========================== */
 
 let brevoApi = null;
-
 if (HAS_BREVO_KEY) {
   try {
     const client = Brevo.ApiClient.instance;
-
-    // CORRECT AUTH FIELD
     client.authentications["api-key"].apiKey = process.env.BREVO_API_KEY;
-
-    // ABSOLUTELY REQUIRED FOR PRODUCTION DELIVERY
     client.basePath = "https://api.brevo.com/v3";
-
     brevoApi = new Brevo.TransactionalEmailsApi();
-
-    console.log("✅ Brevo email client initialized and ready");
+    console.log("✅ Brevo email client ready");
   } catch (err) {
-    console.error("❌ Failed to initialize Brevo client:", err);
+    console.error("❌ Brevo init failed", err);
     brevoApi = null;
   }
 } else {
-  console.warn("⚠️ BREVO_API_KEY missing — emails will be logged only");
-}
-
-
-/* ===========================
-   DATABASE
-   =========================== */
-
-const dbFile = path.join(__dirname, "applications.json");
-
-function readDB() {
-  if (!fs.existsSync(dbFile)) return [];
-  return JSON.parse(fs.readFileSync(dbFile, "utf8"));
-}
-
-function writeDB(data) {
-  fs.writeFileSync(dbFile, JSON.stringify(data, null, 2));
+  console.warn("⚠️ Missing BREVO_API_KEY (emails disabled)");
 }
 
 /* ===========================
-   USERS DATABASE
+   MONGODB CONNECTION
    =========================== */
 
-const usersFile = path.join(__dirname, "users.json");
-
-function readUsers() {
-  if (!fs.existsSync(usersFile)) return [];
-  return JSON.parse(fs.readFileSync(usersFile, "utf8"));
+if (!process.env.MONGO_URI) {
+  console.error("❌ MONGO_URI missing in .env");
+  process.exit(1);
 }
 
-function writeUsers(data) {
-  fs.writeFileSync(usersFile, JSON.stringify(data, null, 2));
+const client = new MongoClient(process.env.MONGO_URI);
+let db, Applications, Users;
+
+async function initDB() {
+  await client.connect();
+  db = client.db("shoreRoleplay");
+  Applications = db.collection("applications");
+  Users = db.collection("users");
+  console.log("📦 MongoDB connected");
 }
 
+initDB();
 
 /* ===========================
    EMAIL TEMPLATES
@@ -100,7 +81,7 @@ async function sendDecisionEmail(status, user) {
       : "Your Shore Roleplay Application Status";
 
   if (!brevoApi) {
-    console.log("📧 [DEV MODE] Email skipped:", { to: user.email, subject });
+    console.log("📧 [DEV MODE] Skipped email:", { to: user.email, subject });
     return;
   }
 
@@ -112,11 +93,9 @@ async function sendDecisionEmail(status, user) {
     email.htmlContent = html;
 
     await brevoApi.sendTransacEmail(email);
-
-    console.log(`📧 Brevo email sent to ${user.email}`);
+    console.log(`📧 Email sent → ${user.email}`);
   } catch (err) {
-    console.error("❌ EMAIL SEND ERROR:", err.response?.body || err);
-    throw err;
+    console.error("❌ Email error:", err.response?.body || err);
   }
 }
 
@@ -128,102 +107,77 @@ async function sendDecisionEmail(status, user) {
 app.get("/", (req, res) => res.send("Shore Roleplay Backend Online 🚀"));
 
 // GET ALL APPLICATIONS
-app.get("/applications", (req, res) => res.json(readDB()));
+app.get("/applications", async (req, res) => {
+  res.json(await Applications.find({}).toArray());
+});
 
 // STAFF AUTH
 app.post("/staff-auth", (req, res) => {
-  const { password } = req.body;
-
   if (!process.env.STAFF_PANEL_PASSWORD)
-    return res.status(500).json({ error: "Staff password not configured" });
+    return res.status(500).json({ error: "Staff password not set" });
 
-  if (password === process.env.STAFF_PANEL_PASSWORD)
-    return res.json({ success: true });
-
-  res.status(401).json({ error: "Invalid password" });
+  req.body.password === process.env.STAFF_PANEL_PASSWORD
+    ? res.json({ success: true })
+    : res.status(401).json({ error: "Invalid password" });
 });
 
 /* ===========================
    APPLICATION SUBMISSION
    =========================== */
 
-app.post("/apply", (req, res) => {
+app.post("/apply", async (req, res) => {
   try {
     const { id, username, email, department, reason, agreedLogging, agreedDiscord } = req.body;
 
-    if (!id || typeof id !== "string")
-      return res.status(400).json({ error: "Invalid or missing application ID" });
-
-    if (!username || username.trim().length < 3)
-      return res.status(400).json({ error: "Invalid username" });
-
-    if (!email || !email.includes("@"))
-      return res.status(400).json({ error: "Invalid email" });
-
-    if (!department)
-      return res.status(400).json({ error: "Department not selected" });
-
-    if (!reason || reason.trim().length < 100)
-      return res.status(400).json({ error: "Reason must be at least 100 characters" });
-
+    if (!id || typeof id !== "string") return res.status(400).json({ error: "Invalid ID" });
+    if (!username || username.length < 3) return res.status(400).json({ error: "Invalid username" });
+    if (!email.includes("@")) return res.status(400).json({ error: "Invalid email" });
+    if (!department) return res.status(400).json({ error: "Select a department" });
+    if (!reason || reason.length < 100) return res.status(400).json({ error: "Reason too short" });
     if (!agreedLogging || !agreedDiscord)
-      return res.status(400).json({ error: "Required agreements not accepted" });
+      return res.status(400).json({ error: "Agreements required" });
 
-    let db = readDB();
+    const exists = await Applications.findOne({ $or: [{ id }, { email }] });
+    if (exists) return res.status(409).json({ error: "Application already exists" });
 
-    if (db.some(a => a.id === id))
-      return res.status(409).json({ error: "Duplicate application ID" });
-
-    if (db.some(a => a.email.toLowerCase() === email.toLowerCase()))
-      return res.status(409).json({ error: "Application already exists for this email" });
-
-    db.push({
+    await Applications.insertOne({
       id,
-      username: username.trim(),
-      email: email.toLowerCase().trim(),
+      username,
+      email,
       department,
-      reason: reason.trim(),
+      reason,
       agreedLogging: true,
       agreedDiscord: true,
       status: "pending",
-      submittedAt: new Date().toISOString()
+      submittedAt: new Date().toISOString(),
     });
 
-    writeDB(db);
     res.json({ success: true, message: "Application received" });
   } catch (err) {
-    console.error("❌ Application Submit Error:", err);
+    console.error("❌ Apply Error:", err);
     res.status(500).json({ error: "Internal error" });
   }
 });
 
 /* ===========================
-   DECISION HANDLER
+   APPLICATION DECISION
    =========================== */
 
 app.post("/applications/:id/decision", async (req, res) => {
   try {
-    const { id } = req.params;
     const { status } = req.body;
-
     if (!["accepted", "denied"].includes(status))
       return res.status(400).json({ error: "Invalid status" });
 
-    const db = readDB();
-    const idx = db.findIndex(a => a.id === id);
+    const appData = await Applications.findOne({ id: req.params.id });
+    if (!appData) return res.status(404).json({ error: "Not found" });
 
-    if (idx === -1)
-      return res.status(404).json({ error: "Application not found" });
-
-    db[idx].status = status;
-    writeDB(db);
-
-    await sendDecisionEmail(status, db[idx]);
+    await Applications.updateOne({ id: req.params.id }, { $set: { status } });
+    await sendDecisionEmail(status, appData);
 
     res.json({ success: true });
   } catch (err) {
-    console.error("❌ Decision error:", err);
-    res.status(500).json({ error: "Email failed" });
+    res.status(500).json({ error: "Decision email failed" });
   }
 });
 
@@ -231,99 +185,52 @@ app.post("/applications/:id/decision", async (req, res) => {
    DELETE APPLICATION
    =========================== */
 
-app.delete("/applications/:id", (req, res) => {
-  try {
-    const { id } = req.params;
-    const db = readDB();
-
-    const index = db.findIndex(a => a.id === id);
-    if (index === -1)
-      return res.status(404).json({ error: "Application not found" });
-
-    db.splice(index, 1);
-    writeDB(db);
-
-    res.json({ success: true, message: "Application deleted" });
-  } catch (err) {
-    console.error("❌ Delete error:", err);
-    res.status(500).json({ error: "Internal delete failure" });
-  }
+app.delete("/applications/:id", async (req, res) => {
+  const result = await Applications.deleteOne({ id: req.params.id });
+  result.deletedCount === 0
+    ? res.status(404).json({ error: "Not found" })
+    : res.json({ success: true, message: "Application deleted" });
 });
-
 
 /* ===========================
    USER REGISTRATION
    =========================== */
 
-app.post("/users/register", (req, res) => {
+app.post("/users/register", async (req, res) => {
   try {
     const { username, email, password } = req.body;
+    if (!username || username.length < 3) return res.status(400).json({ error: "Bad username" });
+    if (!email.includes("@")) return res.status(400).json({ error: "Bad email" });
+    if (!password || password.length < 6) return res.status(400).json({ error: "Bad password" });
 
-    if (!username || username.trim().length < 3)
-      return res.status(400).json({ error: "Invalid username" });
+    const exists = await Users.findOne({ email });
+    if (exists) return res.status(409).json({ error: "Email used" });
 
-    if (!email || !email.includes("@"))
-      return res.status(400).json({ error: "Invalid email address" });
-
-    if (!password || password.length < 6)
-      return res.status(400).json({ error: "Password must be at least 6 characters" });
-
-    let users = readUsers();
-
-    if (users.some(u => u.email.toLowerCase() === email.toLowerCase()))
-      return res.status(409).json({ error: "Email already registered" });
-
-    const newUser = {
+    await Users.insertOne({
       id: crypto.randomUUID(),
-      username: username.trim(),
-      email: email.toLowerCase().trim(),
-      password: password.trim(), // ⚠ plaintext for now
+      username,
+      email,
+      password, // ⚠ still plaintext until we add hashing
       role: "user",
-      createdAt: new Date().toISOString()
-    };
+      createdAt: new Date().toISOString(),
+    });
 
-    users.push(newUser);
-    writeUsers(users);
-
-    console.log(`🟢 New user registered: ${username}`);
     res.json({ success: true, message: "Account created" });
-
   } catch (err) {
     console.error("❌ Register Error:", err);
-    res.status(500).json({ error: "Internal registration failure" });
+    res.status(500).json({ error: "Registration failed" });
   }
 });
-
 
 /* ===========================
    USER LOGIN
    =========================== */
 
-app.post("/users/login", (req, res) => {
-  try {
-    const { email, password } = req.body;
+app.post("/users/login", async (req, res) => {
+  const user = await Users.findOne({ email: req.body.email, password: req.body.password });
+  if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
-    if (!email || !password)
-      return res.status(400).json({ error: "Missing credentials" });
-
-    const users = readUsers();
-    const user = users.find(
-      u => u.email.toLowerCase() === email.toLowerCase() && u.password === password
-    );
-
-    if (!user)
-      return res.status(401).json({ error: "Invalid email or password" });
-
-    res.json({
-      success: true,
-      message: "Login successful",
-      user: { id: user.id, username: user.username, role: user.role }
-    });
-
-  } catch (err) {
-    console.error("❌ Login Error:", err);
-    res.status(500).json({ error: "Internal login failure" });
-  }
+  res.json({ success: true, message: "Login OK", user: { id: user.id, username: user.username, role: user.role } });
 });
 
 /* ===========================
@@ -331,6 +238,4 @@ app.post("/users/login", (req, res) => {
    =========================== */
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log(`🚀 Shore Roleplay backend running on port ${PORT}`)
-);
+app.listen(PORT, () => console.log(`🚀 Backend running on ${PORT}`));
