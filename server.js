@@ -6,8 +6,23 @@ const Brevo = require("@getbrevo/brevo");
 const { MongoClient } = require("mongodb");
 
 const app = express();
-app.use(express.json());
-app.use(cors());
+
+// allow large uploads (profile picture base64)
+app.use(express.json({ limit: "20mb" }));
+
+// FIX CORS
+app.use(
+  cors({
+    origin: [
+      "https://www.shoreroleplay.xyz",
+      "https://shoreroleplay.xyz",
+      "http://localhost:3000"
+    ],
+    methods: ["GET", "POST", "DELETE", "PUT"],
+    allowedHeaders: ["Content-Type"],
+  })
+);
+
 
 /* ===========================
    CONSTANTS
