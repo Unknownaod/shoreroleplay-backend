@@ -1135,58 +1135,64 @@ app.delete("/reply/:id", async (req, res) => {
 /// GALLERY
 /* ============================================================
    GALLERY SYSTEM — Shore Roleplay
-   Fully normalized, department-secured, staff bypass enabled
+   Normalized departments, staff bypass, universal posting
 ============================================================ */
 
 /// VALID DEPARTMENT NAMES → DATABASE CODES
 const VALID_DEPARTMENTS = {
   "Police Department": "pd",
   "PD": "pd",
+  "Police": "pd",
+
   "Sheriff's Office": "sd",
+  "Sheriff": "sd",
   "SO": "sd",
+
   "State Patrol": "sp",
   "State Police": "sp",
   "SP": "sp",
+
   "Fire & Rescue": "fire",
   "Fire Department": "fire",
   "FIRE": "fire",
+
   "EMS": "ems",
+
   "Civilian Media": "civ",
   "Civilian Operations": "civ",
-  "CIV": "civ"
+  "CIV": "civ",
+  "Civilian": "civ"
 };
+
+/// 🔁 Normalize ANY input into standardized code
+function normalizeDept(raw) {
+  if (!raw) return "civ";
+  const key = raw.toString().trim();
+  return (
+    VALID_DEPARTMENTS[key] ||
+    VALID_DEPARTMENTS[key.toUpperCase()] ||
+    key.toLowerCase() ||
+    "civ"
+  );
+}
 
 /* ------------------------------------------------------------
    POST /gallery
-   Uploads a gallery image, validates department permissions,
-   and ALWAYS stores the department as a short lowercase code.
+   Accepts posting if STAFF or accepted into ANY department
+   Always stores normalized department code
 ------------------------------------------------------------ */
 app.post("/gallery", async (req, res) => {
   try {
     const { department, imageUrl, caption, author } = req.body;
+
     if (!department || !imageUrl || !author) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // Normalize departments
-    const normalize = d => {
-      d = String(d).toLowerCase();
-      if (d.includes("police") || d === "pd") return "pd";
-      if (d.includes("sheriff") || d === "sd") return "sd";
-      if (d.includes("state") || d === "sp") return "sp";
-      if (d.includes("fire")) return "fire";
-      if (d.includes("ems") || d.includes("medical")) return "ems";
-      if (d.includes("civilian") || d.includes("media") || d === "civ") return "civ";
-      if (d.includes("staff")) return "staff";
-      return d;
-    };
-
-    const dept = normalize(department);
-
-    // FETCH USER
     const user = await Users.findOne({ username: author });
-    if (!user) return res.status(403).json({ error: "Invalid user" });
+    if (!user) return res.status(403).json({ error: "User not found" });
 
+    // Staff whitelist
     const STAFF_ROLES = [
       "Head Administrator",
       "Internal Affairs",
@@ -1199,21 +1205,25 @@ app.post("/gallery", async (req, res) => {
 
     const isStaff = STAFF_ROLES.includes(user.role);
 
+    // If NOT staff → must have at least 1 accepted application
     if (!isStaff) {
-      // Load accepted departments
-      const apps = await Applications.find({ email: user.email, status: "accepted" });
-      const accepted = [...new Set(apps.map(a => normalize(a.department)))];
+      const apps = await Applications.find({
+        email: user.email,
+        status: "accepted"
+      });
 
-      if (!accepted.includes(dept)) {
+      if (!apps.length) {
         return res.status(403).json({
-          error: `You are not accepted into ${department}, upload denied`
+          error: "You must be staff or accepted into ANY department to upload"
         });
       }
     }
 
-    // CREATE GALLERY ENTRY
+    // Normalize department BEFORE saving
+    const deptCode = normalizeDept(department);
+
     const record = await Gallery.create({
-      department: dept,
+      department: deptCode,
       imageUrl,
       caption: caption || "",
       author: user.username,
@@ -1221,9 +1231,10 @@ app.post("/gallery", async (req, res) => {
     });
 
     res.status(201).json(record);
+
   } catch (err) {
     console.error("GALLERY UPLOAD ERROR:", err);
-    res.status(500).json({ error: "Server error while posting image" });
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
