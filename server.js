@@ -197,15 +197,6 @@ app.post("/ha-auth", (req, res) => {
   return res.status(401).json({ error: "Invalid head admin password" });
 });
 
-
-// ===== GALLERY MODEL =====
-  department: { type: String, required: true }, // "pd", "fire", etc.
-  imageUrl:   { type: String, required: true },
-  caption:    { type: String, default: "" },
-  author:     { type: String, required: true },
-  createdAt:  { type: Date, default: Date.now }
-}));
-
 /* ===========================
    APPLICATIONS
    =========================== */
