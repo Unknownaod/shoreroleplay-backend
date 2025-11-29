@@ -231,6 +231,43 @@ app.post("/apply", async (req, res) => {
 });
 
 
+/* Decide on an application */
+app.post("/applications/:id/decision", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { decision, reason } = req.body;
+
+    // Validate input
+    if (!["accepted", "denied"].includes(decision)) {
+      return res.status(400).json({ error: "Invalid decision type" });
+    }
+
+    // Find application
+    const appDoc = await Applications.findOne({ id: id });
+    if (!appDoc) {
+      return res.status(404).json({ error: "Application not found" });
+    }
+
+    // Update application
+    await Applications.updateOne(
+      { id: id },
+      {
+        $set: {
+          status: decision,
+          decisionReason: reason || null,
+          decisionDate: new Date(),
+        },
+      }
+    );
+
+    res.json({ message: `Application ${decision} successfully.` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update application decision" });
+  }
+});
+
+
 /* Get all applications for a specific user by email */
 app.get("/applications/user/:email", async (req, res) => {
   try {
