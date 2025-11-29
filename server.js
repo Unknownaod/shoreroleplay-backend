@@ -288,6 +288,24 @@ app.get("/applications/user/:email", async (req, res) => {
   }
 });
 
+
+/* ===========================
+   APPLICATIONS – REQUIRED ENDPOINT
+   =========================== */
+
+app.get("/applications", async (req, res) => {
+  try {
+    const apps = await Applications.find({})
+      .sort({ submittedAt: -1 })
+      .toArray();
+    res.json(apps);
+  } catch (err) {
+    console.error("❌ Failed to load applications:", err);
+    res.status(500).json({ error: "Failed to load applications" });
+  }
+});
+
+
 /* ===========================
    USERS
    =========================== */
