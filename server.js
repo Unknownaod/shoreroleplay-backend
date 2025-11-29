@@ -568,6 +568,14 @@ app.get("/users/:id", async (req, res) => {
     const user = await Users.findOne({ id: req.params.id });
     if (!user) return res.status(404).json({ error: "Not found" });
 
+    // fetch ALL accepted applications for the user
+    const acceptedApps = await Applications.find(
+      { email: user.email, status: "accepted" },
+      { projection: { department: 1, _id: 0 } }
+    ).toArray();
+
+    const departments = acceptedApps.map(a => a.department);
+
     res.json({
       id: user.id,
       username: user.username,
@@ -579,15 +587,21 @@ app.get("/users/:id", async (req, res) => {
       banReason: user.banReason || null,
       banDate: user.banDate || null,
       createdAt: user.createdAt,
-      hwid: user.hwid || null,
       lastIP: user.lastIP || null,
       lastLoginAt: user.lastLoginAt || null,
-      department: user.department || null,
+      
+      // NEW — always return array of departments
+      departments,
+
+      // backwards compatibility
+      department: departments[0] || null
     });
   } catch (err) {
+    console.log(err);
     res.status(500).json({ error: "Failed" });
   }
 });
+
 
 app.delete("/users/:id", async (req, res) => {
   try {
