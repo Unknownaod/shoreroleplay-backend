@@ -273,6 +273,20 @@ app.get("/applications/history", async (req, res) => {
   }
 });
 
+/* ===============================================
+   GET APPLICATIONS BY USER EMAIL
+   Used by forums + profile pages
+   =============================================== */
+app.get("/applications/user/:email", async (req, res) => {
+  try {
+    const email = decodeURIComponent(req.params.email).toLowerCase();
+    const apps = await Applications.find({ email }).sort({ submittedAt: -1 }).toArray();
+    res.json(apps);
+  } catch (err) {
+    console.error("User application lookup failed:", err);
+    res.status(500).json({ error: "Lookup failed" });
+  }
+});
 
 /* ===========================
    USERS
