@@ -184,6 +184,10 @@ app.post("/ha-auth", (req, res) => {
     : res.status(401).json({ error: "Invalid head admin password" });
 });
 
+/* ===========================
+   APPLICATIONS (ORIGINAL)
+   =========================== */
+
 app.post("/apply", async (req, res) => {
   try {
     const {
@@ -202,20 +206,11 @@ app.post("/apply", async (req, res) => {
     if (reason.length < 100)
       return res.status(400).json({ error: "Reason too short" });
 
-    // 🔍 Check if the user already has a PENDING application
-    const pending = await Applications.findOne({
-      email: email,
-      status: "pending",
-    });
+    // PREVENT SAME APPLICATION ID, BUT ALLOW MULTIPLE APPLICATIONS
+    // just ensure they don't submit the same ID twice
+    const exists = await Applications.findOne({ id });
+    if (exists) return res.status(409).json({ error: "Exists" });
 
-    if (pending) {
-      return res.status(409).json({
-        error:
-          "You already have a pending application. Please wait for a staff decision before submitting a new one.",
-      });
-    }
-
-    // 🟢 Allowed to reapply if previous apps were accepted or denied
     await Applications.insertOne({
       id,
       username,
@@ -230,10 +225,11 @@ app.post("/apply", async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error("Apply Error:", err);
+    console.error("❌ APPLY ERROR:", err);
     res.status(500).json({ error: "Internal" });
   }
 });
+
 
 
 /* ===========================
@@ -865,55 +861,46 @@ const VALID_DEPARTMENTS = {
 };
 
 /* ---------- GET ALL GALLERY ITEMS ---------- */
+/* ===========================
+   GALLERY (ORIGINAL)
+   =========================== */
+
 app.get("/gallery", async (_, res) => {
   try {
     const items = await Gallery.find({})
-      .sort({ createdAt: -1 }) // newest first
+      .sort({ createdAt: -1 })
       .toArray();
-
     res.json(items);
   } catch (err) {
-    console.error("❌ GALLERY FETCH FAILED:", err);
-    res.status(500).json({ error: "Failed to load gallery" });
+    console.error("❌ GALLERY FETCH ERROR:", err);
+    res.status(500).json({ error: "Failed" });
   }
 });
 
-
-/* ---------- POST NEW GALLERY ITEM ---------- */
 app.post("/gallery", async (req, res) => {
   try {
     const { department, imageUrl, caption, author } = req.body;
 
     if (!department || !imageUrl || !author)
-      return res.status(400).json({ error: "Missing required fields" });
-
-    // Normalize department to internal ID
-    const deptId = VALID_DEPARTMENTS[department] || department.toLowerCase();
-
-    // Validate department
-    if (!Object.values(VALID_DEPARTMENTS).includes(deptId)) {
-      return res.status(400).json({
-        error: `Invalid department '${department}'. Valid options: pd, sd, sp, fire, ems, civ`
-      });
-    }
+      return res.status(400).json({ error: "Missing" });
 
     const item = {
       id: crypto.randomUUID(),
-      department: deptId, // store normalized dept
+      department,         // ← stored exactly how frontend sends it
       imageUrl,
-      caption: caption?.trim() || "",
+      caption: caption || "",
       author,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
     };
 
     await Gallery.insertOne(item);
     res.json({ success: true, item });
-
   } catch (err) {
-    console.error("❌ GALLERY UPLOAD ERROR:", err);
-    res.status(500).json({ error: "Failed to upload photo" });
+    console.error("❌ GALLERY POST ERROR:", err);
+    res.status(500).json({ error: "Failed" });
   }
 });
+
 /* ===========================
    START SERVER
    =========================== */
