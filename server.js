@@ -830,24 +830,31 @@ app.get("/users/:id", async (req, res) => {
       role: user.role,
       staffTag: user.staffTag || null,
       staffIcon: user.staffIcon || null,
+
       banned: !!user.banned,
       banReason: user.banReason || null,
       banDate: user.banDate || null,
+
       createdAt: user.createdAt,
       lastIP: user.lastIP || null,
       lastLoginAt: user.lastLoginAt || null,
-      
-      // NEW — always return array of departments
+
+      // 🆕 RETURN HWID SO FRONTEND CAN DISPLAY IT
+      hwid: user.hwid || null,
+
+      // 🚨 MULTIPLE DEPARTMENTS SUPPORT
       departments,
 
-      // backwards compatibility
+      // backward compatibility for old pages
       department: departments[0] || null
     });
+
   } catch (err) {
     console.log(err);
     res.status(500).json({ error: "Failed" });
   }
 });
+
 
 
 app.delete("/users/:id", async (req, res) => {
