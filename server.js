@@ -344,6 +344,32 @@ app.get("/applications/user/:email", async (req, res) => {
 
 
 /* ===========================
+   DELETE APPLICATION (STAFF ONLY)
+   =========================== */
+app.delete("/applications/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Ensure staff is performing this action
+    const staff = await Users.findOne({ id: req.body.userId });
+    if (!staff || !isStaff(staff)) {
+      return res.status(403).json({ error: "Staff only" });
+    }
+
+    const result = await Applications.deleteOne({ id });
+
+    if (!result.deletedCount) {
+      return res.status(404).json({ error: "Application not found" });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ APP DELETE ERROR:", err);
+    res.status(500).json({ error: "Failed to delete application" });
+  }
+});
+
+/* ===========================
    APPLICATIONS – REQUIRED ENDPOINT
    =========================== */
 
