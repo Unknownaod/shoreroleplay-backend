@@ -1133,8 +1133,12 @@ app.delete("/reply/:id", async (req, res) => {
 });
 
 /// GALLERY
-/// GALLERY FIXED
+/* ============================================================
+   GALLERY SYSTEM — Shore Roleplay
+   Fully normalized, department-secured, staff bypass enabled
+============================================================ */
 
+/// VALID DEPARTMENT NAMES → DATABASE CODES
 const VALID_DEPARTMENTS = {
   "Police Department": "pd",
   "PD": "pd",
@@ -1152,6 +1156,11 @@ const VALID_DEPARTMENTS = {
   "CIV": "civ"
 };
 
+/* ------------------------------------------------------------
+   POST /gallery
+   Uploads a gallery image, validates department permissions,
+   and ALWAYS stores the department as a short lowercase code.
+------------------------------------------------------------ */
 app.post("/gallery", async (req, res) => {
   try {
     const { department, imageUrl, caption, author } = req.body;
@@ -1159,7 +1168,7 @@ app.post("/gallery", async (req, res) => {
     if (!department || !imageUrl || !author)
       return res.status(400).json({ error: "Missing fields" });
 
-    // Normalize department (convert any label into its code)
+    // Normalize department label → code
     const deptCode =
       VALID_DEPARTMENTS[department] ||
       VALID_DEPARTMENTS[department.toUpperCase()] ||
@@ -1169,14 +1178,14 @@ app.post("/gallery", async (req, res) => {
     const user = await Users.findOne({ username: author });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    // Staff bypass
+    // Staff can always post
     if (!isStaff(user)) {
       const accepted = await Applications.find({
         email: user.email,
         status: "accepted"
       }).toArray();
 
-      // Normalize user departments
+      // Normalize all accepted departments for that user
       const userDepartments = accepted.map(a =>
         VALID_DEPARTMENTS[a.department] ||
         VALID_DEPARTMENTS[a.department.toUpperCase()] ||
@@ -1190,10 +1199,10 @@ app.post("/gallery", async (req, res) => {
       }
     }
 
-    // SAVE normalized department
+    // Save image with normalized department code
     const item = {
       id: crypto.randomUUID(),
-      department: deptCode, // ALWAYS STORED AS CODE
+      department: deptCode,
       imageUrl,
       caption: caption || "",
       author,
@@ -1201,13 +1210,44 @@ app.post("/gallery", async (req, res) => {
     };
 
     await Gallery.insertOne(item);
-    res.json({ success: true, item });
+
+    return res.json({ success: true, item });
 
   } catch (err) {
     console.error("❌ GALLERY POST ERROR:", err);
-    res.status(500).json({ error: "Failed" });
+    return res.status(500).json({ error: "Failed" });
   }
 });
+
+
+/* ------------------------------------------------------------
+   GET /gallery
+   Returns all gallery items with normalized departments,
+   fixing old data automatically so frontend never breaks again.
+------------------------------------------------------------ */
+app.get("/gallery", async (_, res) => {
+  try {
+    const items = await Gallery.find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    const normalized = items.map(item => ({
+      ...item,
+      department:
+        VALID_DEPARTMENTS[item.department] ||
+        VALID_DEPARTMENTS[item.department?.toUpperCase()] ||
+        item.department?.toLowerCase() ||
+        "civ" // fallback
+    }));
+
+    return res.json(normalized);
+
+  } catch (err) {
+    console.error("❌ GALLERY FETCH ERROR:", err);
+    return res.status(500).json({ error: "Failed to load gallery" });
+  }
+});
+
 
 
 
