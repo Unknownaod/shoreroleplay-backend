@@ -351,6 +351,9 @@ app.post("/users/register", async (req, res) => {
   try {
     const { username, email, password } = req.body;
 
+    // =========================
+    // VALIDATION
+    // =========================
     if (!username || username.length < 3)
       return res.status(400).json({ error: "Bad username" });
     if (!email || !email.includes("@"))
@@ -358,42 +361,82 @@ app.post("/users/register", async (req, res) => {
     if (!password || password.length < 6)
       return res.status(400).json({ error: "Bad password" });
 
+    // =========================
+    // CHECK IF ALREADY A REAL USER
+    // =========================
     const exists = await Users.findOne({ email });
-    if (exists) return res.status(409).json({ error: "Used" });
+    if (exists)
+      return res.status(409).json({ error: "Email already registered" });
 
-    const hwid = generateHWID();
-    const registrationIP = getClientIP(req);
+    // =========================
+    // REMOVE ANY OLD PENDING ACCOUNT
+    // =========================
+    await PendingUsers.deleteMany({ email });
 
-    await Users.insertOne({
-      id: crypto.randomUUID(),
+    // =========================
+    // CREATE VERIFICATION TOKEN
+    // =========================
+    const token = crypto.randomBytes(32).toString("hex");
+
+    await PendingUsers.insertOne({
       username,
       email,
-      password,
-      role: "user",
-      staffTag: null,
-      staffIcon: null,
-      banned: false,
-      banReason: null,
-      banDate: null,
-      createdAt: new Date().toISOString(),
-      hwid,
-      lastIP: registrationIP,
-      lastLoginAt: null,
+      password,        // stored temporarily UNTIL verification
+      token,
+      createdAt: new Date(),
+      ip: getClientIP(req)
     });
 
-    res.json({ success: true });
+    // =========================
+    // SEND VERIFICATION EMAIL
+    // =========================
+    if (!brevoApi) {
+      console.log("📨 DEV MODE — Verification email skipped:", email, token);
+    } else {
+      const { verifyEmail } = require("./emailTemplates");
+
+      const mail = new Brevo.SendSmtpEmail();
+      mail.sender = { name: FROM_NAME, email: FROM_EMAIL };
+      mail.to = [{ email, name: username }];
+      mail.subject = "Verify Your Shore Roleplay Account";
+      mail.htmlContent = verifyEmail({ username, token });
+
+      await brevoApi.sendTransacEmail(mail);
+    }
+
+    // =========================
+    // RETURN SUCCESS (NO ACCOUNT CREATED YET)
+    // =========================
+    res.json({
+      success: true,
+      message:
+        "Verification email sent. Your account will be created after email confirmation."
+    });
+
   } catch (err) {
-    res.status(500).json({ error: "Failed" });
+    console.error("❌ REGISTER ERROR:", err);
+    res.status(500).json({ error: "Registration failed" });
   }
 });
+
 
 app.post("/users/login", async (req, res) => {
   try {
     const { email, password, hwid } = req.body;
 
+    // Check user credentials
     const user = await Users.findOne({ email, password });
-    if (!user) return res.status(401).json({ error: "Invalid" });
+    if (!user)
+      return res.status(401).json({ error: "Invalid email or password" });
 
+    // 🚫 BLOCK UNVERIFIED ACCOUNTS
+    if (!user.verified) {
+      return res.status(403).json({
+        error: "Please verify your email before logging in"
+      });
+    }
+
+    // Update login metadata
     await Users.updateOne(
       { id: user.id },
       {
@@ -405,12 +448,14 @@ app.post("/users/login", async (req, res) => {
       }
     );
 
+    // Determine department membership
     const hasDept = await Applications.findOne({
       email: user.email,
       status: "accepted",
     });
 
-    res.json({
+    // Return authorized session
+    return res.json({
       success: true,
       message: "OK",
       user: {
@@ -430,7 +475,9 @@ app.post("/users/login", async (req, res) => {
         pfp: user.pfp || null,
       },
     });
+
   } catch (err) {
+    console.error("❌ LOGIN ERROR:", err);
     res.status(500).json({ error: "Failed" });
   }
 });
@@ -482,6 +529,78 @@ app.post("/users/update", async (req, res) => {
     res.status(500).json({ error: "Failed" });
   }
 });
+
+/// VERIFICATION TOKENS
+
+app.get("/users/verify/:token", async (req, res) => {
+  try {
+    const token = req.params.token;
+
+    // 1) Find pending registration
+    const pending = await PendingUsers.findOne({ token });
+
+    if (!pending) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid or expired verification link"
+      });
+    }
+
+    // 2) Double-check no real account already exists
+    const exists = await Users.findOne({ email: pending.email });
+    if (exists) {
+      // Cleanup stale pending registrations
+      await PendingUsers.deleteOne({ _id: pending._id });
+      return res.status(409).json({
+        success: false,
+        error: "Account already exists"
+      });
+    }
+
+    // 3) Create real account now
+    const userId = crypto.randomUUID();
+    const hwid = generateHWID();
+
+    await Users.insertOne({
+      id: userId,
+      username: pending.username,
+      email: pending.email,
+      password: pending.password, // 👈 You already store plain text passwords
+                                 //    consider hashing later
+      role: "user",
+      staffTag: null,
+      staffIcon: null,
+
+      banned: false,
+      banReason: null,
+      banDate: null,
+
+      createdAt: new Date().toISOString(),
+      lastIP: pending.ip || null,
+      lastLoginAt: null,
+      hwid,
+      verified: true, // 🚀 IMPORTANT
+    });
+
+    // 4) Remove pending entry
+    await PendingUsers.deleteOne({ _id: pending._id });
+
+    // 5) Respond with success
+    return res.json({
+      success: true,
+      message: "Account verified successfully. You can now log in."
+    });
+
+  } catch (err) {
+    console.error("❌ VERIFY ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Server error during verification"
+    });
+  }
+});
+
+
 
 /* ===========================
    APPEALS SYSTEM
