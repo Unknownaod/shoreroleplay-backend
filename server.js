@@ -184,19 +184,6 @@ app.post("/ha-auth", (req, res) => {
     : res.status(401).json({ error: "Invalid head admin password" });
 });
 
-/* ===========================
-   APPLICATIONS
-   =========================== */
-
-app.get("/applications", async (req, res) => {
-  try {
-    const apps = await Applications.find({}).toArray();
-    res.json(apps);
-  } catch (err) {
-    res.status(500).json({ error: "Failed" });
-  }
-});
-
 app.post("/apply", async (req, res) => {
   try {
     const {
@@ -215,9 +202,20 @@ app.post("/apply", async (req, res) => {
     if (reason.length < 100)
       return res.status(400).json({ error: "Reason too short" });
 
-    const exists = await Applications.findOne({ $or: [{ id }, { email }] });
-    if (exists) return res.status(409).json({ error: "Exists" });
+    // 🔍 Check if the user already has a PENDING application
+    const pending = await Applications.findOne({
+      email: email,
+      status: "pending",
+    });
 
+    if (pending) {
+      return res.status(409).json({
+        error:
+          "You already have a pending application. Please wait for a staff decision before submitting a new one.",
+      });
+    }
+
+    // 🟢 Allowed to reapply if previous apps were accepted or denied
     await Applications.insertOne({
       id,
       username,
@@ -232,39 +230,11 @@ app.post("/apply", async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
+    console.error("Apply Error:", err);
     res.status(500).json({ error: "Internal" });
   }
 });
 
-app.post("/applications/:id/decision", async (req, res) => {
-  try {
-    const { status } = req.body;
-    if (!["accepted", "denied"].includes(status))
-      return res.status(400).json({ error: "Invalid" });
-
-    const appData = await Applications.findOne({ id: req.params.id });
-    if (!appData) return res.status(404).json({ error: "Not found" });
-
-    await Applications.updateOne({ id: req.params.id }, { $set: { status } });
-    await sendDecisionEmail(status, appData);
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: "Failed" });
-  }
-});
-
-app.delete("/applications/:id", async (req, res) => {
-  try {
-    const result = await Applications.deleteOne({ id: req.params.id });
-    if (!result.deletedCount)
-      return res.status(404).json({ error: "Not found" });
-
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: "Failed" });
-  }
-});
 
 /* ===========================
    USERS
