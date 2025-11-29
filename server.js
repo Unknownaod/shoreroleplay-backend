@@ -27,7 +27,16 @@ app.use(
 /* ===========================
    CONSTANTS
    =========================== */
+// ===== GALLERY MODEL =====
+const Gallery = mongoose.model("Gallery", new mongoose.Schema({
+  department: { type: String, required: true }, // "pd", "fire", etc.
+  imageUrl:   { type: String, required: true },
+  caption:    { type: String, default: "" },
+  author:     { type: String, required: true },
+  createdAt:  { type: Date, default: Date.now }
+}));
 
+/////////////
 const FROM_NAME = process.env.FROM_NAME || "Shore Roleplay";
 const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@shoreroleplay.xyz";
 const HAS_BREVO_KEY = !!process.env.BREVO_API_KEY;
@@ -859,6 +868,45 @@ app.delete("/reply/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to delete reply" });
   }
 });
+
+/// GALLERY MODEL
+
+app.get("/gallery", async (req, res) => {
+  try {
+    const photos = await Gallery.find().sort({ createdAt: -1 });
+    res.json(photos);
+  } catch (err) {
+    console.error("Gallery GET error:", err);
+    res.status(500).json({ error: "Failed to fetch gallery" });
+  }
+});
+
+
+//GALLERY UPLOAD
+
+app.post("/gallery", async (req, res) => {
+  const { department, imageUrl, caption, author } = req.body;
+
+  if (!department || !imageUrl || !author) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    const item = await Gallery.create({
+      department,
+      imageUrl,
+      caption: caption || "",
+      author
+    });
+
+    res.json({ success: true, item });
+  } catch (err) {
+    console.error("Gallery POST error:", err);
+    res.status(500).json({ error: "Failed to upload photo" });
+  }
+});
+
+
 
 /* ===========================
    START SERVER
