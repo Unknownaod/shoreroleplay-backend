@@ -243,6 +243,36 @@ app.get("/applications/user/:email", async (req, res) => {
   }
 });
 
+/* ===========================
+   APPLICATION FILTER ROUTES
+   =========================== */
+
+/* Get ONLY pending apps */
+app.get("/applications/pending", async (req, res) => {
+  try {
+    const apps = await Applications.find({ status: "pending" })
+      .sort({ submittedAt: -1 })
+      .toArray();
+
+    res.json(apps);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch pending applications" });
+  }
+});
+
+/* Get ONLY previous (accepted/denied) apps */
+app.get("/applications/history", async (req, res) => {
+  try {
+    const apps = await Applications.find({ status: { $ne: "pending" } })
+      .sort({ submittedAt: -1 })
+      .toArray();
+
+    res.json(apps);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch application history" });
+  }
+});
+
 
 /* ===========================
    USERS
