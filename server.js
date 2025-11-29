@@ -27,15 +27,6 @@ app.use(
 /* ===========================
    CONSTANTS
    =========================== */
-// ===== GALLERY MODEL =====
-const Gallery = mongoose.model("Gallery", new mongoose.Schema({
-  department: { type: String, required: true }, // "pd", "fire", etc.
-  imageUrl:   { type: String, required: true },
-  caption:    { type: String, default: "" },
-  author:     { type: String, required: true },
-  createdAt:  { type: Date, default: Date.now }
-}));
-
 /////////////
 const FROM_NAME = process.env.FROM_NAME || "Shore Roleplay";
 const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@shoreroleplay.xyz";
@@ -82,7 +73,7 @@ if (!process.env.MONGO_URI) {
 }
 
 const client = new MongoClient(process.env.MONGO_URI);
-let db, Applications, Users, Appeals, Threads, Replies;
+let db, Applications, Users, Appeals, Threads, Replies, Gallery;
 
 async function initDB() {
   await client.connect();
@@ -92,6 +83,7 @@ async function initDB() {
   Appeals = db.collection("appeals");
   Threads = db.collection("threads");
   Replies = db.collection("replies");
+  Gallery = db.collection("gallery");
   console.log("📦 MongoDB connected");
 }
 
@@ -204,6 +196,15 @@ app.post("/ha-auth", (req, res) => {
 
   return res.status(401).json({ error: "Invalid head admin password" });
 });
+
+
+// ===== GALLERY MODEL =====
+  department: { type: String, required: true }, // "pd", "fire", etc.
+  imageUrl:   { type: String, required: true },
+  caption:    { type: String, default: "" },
+  author:     { type: String, required: true },
+  createdAt:  { type: Date, default: Date.now }
+}));
 
 /* ===========================
    APPLICATIONS
@@ -871,9 +872,13 @@ app.delete("/reply/:id", async (req, res) => {
 
 /// GALLERY MODEL
 
+// GET ALL GALLERY PHOTOS
 app.get("/gallery", async (req, res) => {
   try {
-    const photos = await Gallery.find().sort({ createdAt: -1 });
+    const photos = await Gallery.find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
     res.json(photos);
   } catch (err) {
     console.error("Gallery GET error:", err);
@@ -881,23 +886,25 @@ app.get("/gallery", async (req, res) => {
   }
 });
 
-
-//GALLERY UPLOAD
-
+// UPLOAD PHOTO
 app.post("/gallery", async (req, res) => {
-  const { department, imageUrl, caption, author } = req.body;
-
-  if (!department || !imageUrl || !author) {
-    return res.status(400).json({ error: "Missing required fields" });
-  }
-
   try {
-    const item = await Gallery.create({
+    const { department, imageUrl, caption, author } = req.body;
+
+    if (!department || !imageUrl || !author) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    const item = {
+      id: crypto.randomUUID(),
       department,
       imageUrl,
       caption: caption || "",
-      author
-    });
+      author,
+      createdAt: new Date().toISOString(),
+    };
+
+    await Gallery.insertOne(item);
 
     res.json({ success: true, item });
   } catch (err) {
@@ -905,6 +912,7 @@ app.post("/gallery", async (req, res) => {
     res.status(500).json({ error: "Failed to upload photo" });
   }
 });
+
 
 
 
