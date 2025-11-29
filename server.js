@@ -1133,6 +1133,24 @@ app.delete("/reply/:id", async (req, res) => {
 });
 
 /// GALLERY
+/// GALLERY FIXED
+
+const VALID_DEPARTMENTS = {
+  "Police Department": "pd",
+  "PD": "pd",
+  "Sheriff's Office": "sd",
+  "SO": "sd",
+  "State Patrol": "sp",
+  "State Police": "sp",
+  "SP": "sp",
+  "Fire & Rescue": "fire",
+  "Fire Department": "fire",
+  "FIRE": "fire",
+  "EMS": "ems",
+  "Civilian Media": "civ",
+  "Civilian Operations": "civ",
+  "CIV": "civ"
+};
 
 app.post("/gallery", async (req, res) => {
   try {
@@ -1141,32 +1159,41 @@ app.post("/gallery", async (req, res) => {
     if (!department || !imageUrl || !author)
       return res.status(400).json({ error: "Missing fields" });
 
+    // Normalize department (convert any label into its code)
+    const deptCode =
+      VALID_DEPARTMENTS[department] ||
+      VALID_DEPARTMENTS[department.toUpperCase()] ||
+      department.toLowerCase();
+
     // Fetch user
     const user = await Users.findOne({ username: author });
     if (!user) return res.status(404).json({ error: "User not found" });
 
     // Staff bypass
     if (!isStaff(user)) {
-      // Fetch all accepted departments for this user
       const accepted = await Applications.find({
         email: user.email,
         status: "accepted"
       }).toArray();
 
-      const userDepartments = accepted.map(a => a.department.toLowerCase());
+      // Normalize user departments
+      const userDepartments = accepted.map(a =>
+        VALID_DEPARTMENTS[a.department] ||
+        VALID_DEPARTMENTS[a.department.toUpperCase()] ||
+        a.department.toLowerCase()
+      );
 
-      // 🔥 Validate that the post department is one the user belongs to
-      if (!userDepartments.includes(department.toLowerCase())) {
+      if (!userDepartments.includes(deptCode)) {
         return res.status(403).json({
-          error: `You are not a member of ${department}`
+          error: `You are not a member of the ${department} department`
         });
       }
     }
 
-    // Save image
+    // SAVE normalized department
     const item = {
       id: crypto.randomUUID(),
-      department,
+      department: deptCode, // ALWAYS STORED AS CODE
       imageUrl,
       caption: caption || "",
       author,
@@ -1174,7 +1201,6 @@ app.post("/gallery", async (req, res) => {
     };
 
     await Gallery.insertOne(item);
-
     res.json({ success: true, item });
 
   } catch (err) {
@@ -1182,6 +1208,7 @@ app.post("/gallery", async (req, res) => {
     res.status(500).json({ error: "Failed" });
   }
 });
+
 
 
 /* ===========================
