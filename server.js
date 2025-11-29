@@ -70,17 +70,24 @@ if (!process.env.MONGO_URI) {
 }
 
 const client = new MongoClient(process.env.MONGO_URI);
-let db, Applications, Users, Appeals, Threads, Replies, Gallery;
+
+// ADD PendingUsers HERE ⬇
+let db, Applications, Users, PendingUsers, Appeals, Threads, Replies, Gallery;
 
 async function initDB() {
   await client.connect();
   db = client.db("shoreRoleplay");
+
+  // MAIN COLLECTIONS
   Applications = db.collection("applications");
   Users = db.collection("users");
   Appeals = db.collection("appeals");
   Threads = db.collection("threads");
   Replies = db.collection("replies");
   Gallery = db.collection("gallery");
+
+  // 🆕 REQUIRED FOR EMAIL VERIFICATION FLOW
+  PendingUsers = db.collection("pendingUsers");
 
   console.log("📦 MongoDB connected");
 }
@@ -89,6 +96,7 @@ initDB().catch((err) => {
   console.error("❌ DB init error:", err);
   process.exit(1);
 });
+
 
 /* ===========================
    HELPERS
@@ -121,7 +129,15 @@ function isStaff(user) {
    EMAIL TEMPLATES
    =========================== */
 
-const { acceptedEmail, deniedEmail } = require("./emailTemplates");
+const {
+  acceptedEmail,
+  deniedEmail,
+  verifyEmail
+} = require("./emailTemplates");
+
+/* ============================================================
+   SEND DECISION EMAILS (APPLICATION STATUS)
+   ============================================================ */
 
 async function sendDecisionEmail(status, user) {
   const html =
@@ -152,6 +168,7 @@ async function sendDecisionEmail(status, user) {
     console.error("❌ Email error:", err.response?.body || err);
   }
 }
+
 
 /* ===========================
    ROUTES – BASIC
