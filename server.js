@@ -435,6 +435,19 @@ app.post("/appeals", async (req, res) => {
   }
 });
 
+/* LIST ALL APPEALS (HA ONLY) */
+app.get("/appeals", async (req, res) => {
+  try {
+    const appeals = await Appeals.find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.json(appeals);
+  } catch (err) {
+    res.status(500).json({ error: "Failed" });
+  }
+});
+
+
 /* ===========================
    USER ADMIN
    =========================== */
