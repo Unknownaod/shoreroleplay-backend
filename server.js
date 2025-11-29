@@ -1164,60 +1164,69 @@ const VALID_DEPARTMENTS = {
 app.post("/gallery", async (req, res) => {
   try {
     const { department, imageUrl, caption, author } = req.body;
+    if (!department || !imageUrl || !author) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
 
-    if (!department || !imageUrl || !author)
-      return res.status(400).json({ error: "Missing fields" });
+    // Normalize departments
+    const normalize = d => {
+      d = String(d).toLowerCase();
+      if (d.includes("police") || d === "pd") return "pd";
+      if (d.includes("sheriff") || d === "sd") return "sd";
+      if (d.includes("state") || d === "sp") return "sp";
+      if (d.includes("fire")) return "fire";
+      if (d.includes("ems") || d.includes("medical")) return "ems";
+      if (d.includes("civilian") || d.includes("media") || d === "civ") return "civ";
+      if (d.includes("staff")) return "staff";
+      return d;
+    };
 
-    // Normalize department label → code
-    const deptCode =
-      VALID_DEPARTMENTS[department] ||
-      VALID_DEPARTMENTS[department.toUpperCase()] ||
-      department.toLowerCase();
+    const dept = normalize(department);
 
-    // Fetch user
+    // FETCH USER
     const user = await Users.findOne({ username: author });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    if (!user) return res.status(403).json({ error: "Invalid user" });
 
-    // Staff can always post
-    if (!isStaff(user)) {
-      const accepted = await Applications.find({
-        email: user.email,
-        status: "accepted"
-      }).toArray();
+    const STAFF_ROLES = [
+      "Head Administrator",
+      "Internal Affairs",
+      "Administration",
+      "Junior Administration",
+      "Senior Staff",
+      "Staff",
+      "Staff In Training"
+    ];
 
-      // Normalize all accepted departments for that user
-      const userDepartments = accepted.map(a =>
-        VALID_DEPARTMENTS[a.department] ||
-        VALID_DEPARTMENTS[a.department.toUpperCase()] ||
-        a.department.toLowerCase()
-      );
+    const isStaff = STAFF_ROLES.includes(user.role);
 
-      if (!userDepartments.includes(deptCode)) {
+    if (!isStaff) {
+      // Load accepted departments
+      const apps = await Applications.find({ email: user.email, status: "accepted" });
+      const accepted = [...new Set(apps.map(a => normalize(a.department)))];
+
+      if (!accepted.includes(dept)) {
         return res.status(403).json({
-          error: `You are not a member of the ${department} department`
+          error: `You are not accepted into ${department}, upload denied`
         });
       }
     }
 
-    // Save image with normalized department code
-    const item = {
-      id: crypto.randomUUID(),
-      department: deptCode,
+    // CREATE GALLERY ENTRY
+    const record = await Gallery.create({
+      department: dept,
       imageUrl,
       caption: caption || "",
-      author,
-      createdAt: new Date().toISOString()
-    };
+      author: user.username,
+      createdAt: new Date()
+    });
 
-    await Gallery.insertOne(item);
-
-    return res.json({ success: true, item });
-
+    res.status(201).json(record);
   } catch (err) {
-    console.error("❌ GALLERY POST ERROR:", err);
-    return res.status(500).json({ error: "Failed" });
+    console.error("GALLERY UPLOAD ERROR:", err);
+    res.status(500).json({ error: "Server error while posting image" });
   }
 });
+
 
 
 /* ------------------------------------------------------------
