@@ -17,6 +17,8 @@ app.use(
       "https://www.shoreroleplay.xyz",
       "https://shoreroleplay.xyz",
       "http://localhost:3000",
+      "https://shoreroleplayradio.vercel.app",
+      "https://radio.shoreroleplay.xyz",
     ],
     methods: ["GET", "POST", "DELETE", "PUT"],
     allowedHeaders: ["Content-Type"],
