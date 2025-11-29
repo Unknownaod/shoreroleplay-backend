@@ -18,7 +18,7 @@ app.use(
       "https://shoreroleplay.xyz",
       "http://localhost:3000",
     ],
-    methods: ["GET", "POST", "DELETE", "PUT"],
+     methods: ["GET", "POST", "DELETE", "PUT", "PATCH"],
     allowedHeaders: ["Content-Type"],
   })
 );
