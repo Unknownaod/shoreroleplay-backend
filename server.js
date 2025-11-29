@@ -407,18 +407,29 @@ app.post("/users/update", async (req, res) => {
 });
 
 /* ===========================
-   APPEALS
+   APPEALS SYSTEM
    =========================== */
 
+/* CREATE APPEAL (User must be banned) */
 app.post("/appeals", async (req, res) => {
   try {
     const { userId, username, reason } = req.body;
-    if (!userId || !username || !reason || reason.length < 20)
-      return res.status(400).json({ error: "Invalid" });
 
-    const user = await Users.findOne({ id: userId, username });
-    if (!user || !user.banned)
-      return res.status(403).json({ error: "Not banned" });
+    if (!userId || !username || !reason || reason.trim().length < 20)
+      return res.status(400).json({ error: "Reason must be at least 20 characters." });
+
+    const user = await Users.findOne({ id: userId });
+
+    if (!user)
+      return res.status(404).json({ error: "User not found." });
+
+    if (!user.banned)
+      return res.status(403).json({ error: "User is not banned." });
+
+    // Prevent multiple pending appeals
+    const existing = await Appeals.findOne({ userId, status: "pending" });
+    if (existing)
+      return res.status(409).json({ error: "You already have a pending appeal." });
 
     await Appeals.insertOne({
       id: crypto.randomUUID(),
@@ -427,11 +438,14 @@ app.post("/appeals", async (req, res) => {
       reason,
       createdAt: new Date().toISOString(),
       status: "pending",
+      handledBy: null,
+      handledAt: null
     });
 
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: "Failed" });
+    console.error("APPEAL CREATE ERROR:", err);
+    res.status(500).json({ error: "Failed to submit appeal." });
   }
 });
 
@@ -443,9 +457,77 @@ app.get("/appeals", async (req, res) => {
       .toArray();
     res.json(appeals);
   } catch (err) {
-    res.status(500).json({ error: "Failed" });
+    console.error("APPEAL LIST ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch appeals." });
   }
 });
+
+/* SET APPEAL DECISION (accept / deny) */
+app.post("/appeals/:id/decision", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, staffUser } = req.body; // staffUser.username or ID
+
+    if (!["accepted", "denied"].includes(status))
+      return res.status(400).json({ error: "Invalid status." });
+
+    const appeal = await Appeals.findOne({ id });
+    if (!appeal)
+      return res.status(404).json({ error: "Appeal not found." });
+
+    await Appeals.updateOne(
+      { id },
+      { $set: {
+          status,
+          handledBy: staffUser || "Unknown Staff",
+          handledAt: new Date().toISOString()
+        } }
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("APPEAL DECISION ERROR:", err);
+    res.status(500).json({ error: "Failed to update appeal status." });
+  }
+});
+
+/* UNBAN USER WHEN APPEAL ACCEPTED */
+app.post("/appeals/:id/unban", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const appeal = await Appeals.findOne({ id });
+
+    if (!appeal)
+      return res.status(404).json({ error: "Appeal not found." });
+
+    await Users.updateOne(
+      { id: appeal.userId },
+      { $set: { banned: false, banReason: null } }
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("APPEAL UNBAN ERROR:", err);
+    res.status(500).json({ error: "Failed to unban user." });
+  }
+});
+
+/* DELETE APPEAL (HA ONLY) */
+app.delete("/appeals/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await Appeals.deleteOne({ id });
+
+    if (result.deletedCount === 0)
+      return res.status(404).json({ success: false, error: "Appeal not found." });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("APPEAL DELETE ERROR:", err);
+    res.status(500).json({ success: false, error: "Failed to delete appeal." });
+  }
+});
+
 
 
 /* ===========================
