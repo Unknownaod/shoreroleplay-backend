@@ -552,6 +552,40 @@ app.get("/users", async (req, res) => {
 });
 
 /* ===========================
+   USER RESTRICT / UNRESTRICT (STAFF ONLY)
+   =========================== */
+
+app.patch("/users/:id/restrict", async (req, res) => {
+  try {
+    const { userId, restricted } = req.body;
+
+    // Validate staff performing the action
+    const staff = await Users.findOne({ id: userId });
+    if (!staff || !isStaff(staff)) {
+      return res.status(403).json({ error: "Staff only" });
+    }
+
+    const result = await Users.updateOne(
+      { id: req.params.id },
+      { $set: { restricted: !!restricted } }
+    );
+
+    if (!result.matchedCount) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({
+      success: true,
+      message: `User ${restricted ? "restricted" : "unrestricted"}`,
+    });
+  } catch (err) {
+    console.error("❌ Restrict Error:", err);
+    res.status(500).json({ error: "Failed to update restriction" });
+  }
+});
+
+
+/* ===========================
    FORUM
    =========================== */
 
