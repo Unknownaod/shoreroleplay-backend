@@ -846,36 +846,74 @@ app.delete("/reply/:id", async (req, res) => {
    GALLERY
    =========================== */
 
+// Accepted department IDs (must match frontend)
+const VALID_DEPARTMENTS = {
+  "Police Department": "pd",
+  "PD": "pd",
+  "Sheriff's Office": "sd",
+  "SO": "sd",
+  "State Patrol": "sp",
+  "State Police": "sp",
+  "SP": "sp",
+  "Fire & Rescue": "fire",
+  "Fire Department": "fire",
+  "FIRE": "fire",
+  "EMS": "ems",
+  "Civilian Media": "civ",
+  "Civilian Operations": "civ",
+  "CIV": "civ"
+};
+
+/* ---------- GET ALL GALLERY ITEMS ---------- */
 app.get("/gallery", async (_, res) => {
   try {
-    res.json(await Gallery.find({}).sort({ createdAt: -1 }).toArray());
+    const items = await Gallery.find({})
+      .sort({ createdAt: -1 }) // newest first
+      .toArray();
+
+    res.json(items);
   } catch (err) {
-    res.status(500).json({ error: "Failed" });
+    console.error("❌ GALLERY FETCH FAILED:", err);
+    res.status(500).json({ error: "Failed to load gallery" });
   }
 });
 
+
+/* ---------- POST NEW GALLERY ITEM ---------- */
 app.post("/gallery", async (req, res) => {
   try {
     const { department, imageUrl, caption, author } = req.body;
+
     if (!department || !imageUrl || !author)
-      return res.status(400).json({ error: "Missing" });
+      return res.status(400).json({ error: "Missing required fields" });
+
+    // Normalize department to internal ID
+    const deptId = VALID_DEPARTMENTS[department] || department.toLowerCase();
+
+    // Validate department
+    if (!Object.values(VALID_DEPARTMENTS).includes(deptId)) {
+      return res.status(400).json({
+        error: `Invalid department '${department}'. Valid options: pd, sd, sp, fire, ems, civ`
+      });
+    }
 
     const item = {
       id: crypto.randomUUID(),
-      department,
+      department: deptId, // store normalized dept
       imageUrl,
-      caption: caption || "",
+      caption: caption?.trim() || "",
       author,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date().toISOString()
     };
 
     await Gallery.insertOne(item);
     res.json({ success: true, item });
+
   } catch (err) {
-    res.status(500).json({ error: "Failed" });
+    console.error("❌ GALLERY UPLOAD ERROR:", err);
+    res.status(500).json({ error: "Failed to upload photo" });
   }
 });
-
 /* ===========================
    START SERVER
    =========================== */
