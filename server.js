@@ -1132,68 +1132,57 @@ app.delete("/reply/:id", async (req, res) => {
   }
 });
 
-/* ===========================
-   GALLERY
-   =========================== */
-
-// Accepted department IDs (must match frontend)
-const VALID_DEPARTMENTS = {
-  "Police Department": "pd",
-  "PD": "pd",
-  "Sheriff's Office": "sd",
-  "SO": "sd",
-  "State Patrol": "sp",
-  "State Police": "sp",
-  "SP": "sp",
-  "Fire & Rescue": "fire",
-  "Fire Department": "fire",
-  "FIRE": "fire",
-  "EMS": "ems",
-  "Civilian Media": "civ",
-  "Civilian Operations": "civ",
-  "CIV": "civ"
-};
-
-/* ---------- GET ALL GALLERY ITEMS ---------- */
-/* ===========================
-   GALLERY (ORIGINAL)
-   =========================== */
-
-app.get("/gallery", async (_, res) => {
-  try {
-    const items = await Gallery.find({})
-      .sort({ createdAt: -1 })
-      .toArray();
-    res.json(items);
-  } catch (err) {
-    console.error("❌ GALLERY FETCH ERROR:", err);
-    res.status(500).json({ error: "Failed" });
-  }
-});
+/// GALLERY
 
 app.post("/gallery", async (req, res) => {
   try {
     const { department, imageUrl, caption, author } = req.body;
 
     if (!department || !imageUrl || !author)
-      return res.status(400).json({ error: "Missing" });
+      return res.status(400).json({ error: "Missing fields" });
 
+    // Fetch user
+    const user = await Users.findOne({ username: author });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Staff bypass
+    if (!isStaff(user)) {
+      // Fetch all accepted departments for this user
+      const accepted = await Applications.find({
+        email: user.email,
+        status: "accepted"
+      }).toArray();
+
+      const userDepartments = accepted.map(a => a.department.toLowerCase());
+
+      // 🔥 Validate that the post department is one the user belongs to
+      if (!userDepartments.includes(department.toLowerCase())) {
+        return res.status(403).json({
+          error: `You are not a member of ${department}`
+        });
+      }
+    }
+
+    // Save image
     const item = {
       id: crypto.randomUUID(),
-      department,         // ← stored exactly how frontend sends it
+      department,
       imageUrl,
       caption: caption || "",
       author,
-      createdAt: new Date().toISOString(),
+      createdAt: new Date().toISOString()
     };
 
     await Gallery.insertOne(item);
+
     res.json({ success: true, item });
+
   } catch (err) {
     console.error("❌ GALLERY POST ERROR:", err);
     res.status(500).json({ error: "Failed" });
   }
 });
+
 
 /* ===========================
    START SERVER
