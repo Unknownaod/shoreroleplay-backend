@@ -231,6 +231,18 @@ app.post("/apply", async (req, res) => {
 });
 
 
+/* Get all applications for a specific user by email */
+app.get("/applications/user/:email", async (req, res) => {
+  try {
+    const email = decodeURIComponent(req.params.email);
+    const apps = await Applications.find({ email }).sort({ submittedAt: -1 }).toArray();
+    res.json(apps);
+  } catch (err) {
+    console.error("APPLICATION FETCH ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch applications" });
+  }
+});
+
 
 /* ===========================
    USERS
