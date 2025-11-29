@@ -363,23 +363,33 @@ app.post("/users/login", async (req, res) => {
       }
     );
 
-    res.json({
-      success: true,
-      message: "Login OK",
-      user: {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        staffTag: user.staffTag || null,
-        staffIcon: user.staffIcon || null,
-        banned: !!user.banned,
-        banReason: user.banReason || null,
-        banDate: user.banDate || null,
-        bio: user.bio || "",
-        pfp: user.pfp || null,
-      },
-    });
+  // CHECK IF USER HAS ACCEPTED APPLICATION
+const hasDept = await Applications.findOne({
+  email: user.email,
+  status: "accepted"
+});
+
+res.json({
+  success: true,
+  message: "Login OK",
+  user: {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    role: user.role,
+    hasDepartment: !!hasDept,   // <-- ADD THIS
+    department: hasDept ? hasDept.department : null, // <-- AND THIS
+    isStaff: STAFF_ROLES.includes(user.role), // <-- AND THIS
+    staffTag: user.staffTag || null,
+    staffIcon: user.staffIcon || null,
+    banned: !!user.banned,
+    banReason: user.banReason || null,
+    banDate: user.banDate || null,
+    bio: user.bio || "",
+    pfp: user.pfp || null,
+  },
+});
+
   } catch (err) {
     console.error("❌ Login Error:", err);
     res.status(500).json({ error: "Login failed" });
