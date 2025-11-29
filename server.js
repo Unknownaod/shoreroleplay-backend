@@ -16,13 +16,12 @@ app.use(
     origin: [
       "https://www.shoreroleplay.xyz",
       "https://shoreroleplay.xyz",
-      "http://localhost:3000"
+      "http://localhost:3000",
     ],
     methods: ["GET", "POST", "DELETE", "PUT"],
     allowedHeaders: ["Content-Type"],
   })
 );
-
 
 /* ===========================
    CONSTANTS
@@ -41,6 +40,15 @@ const STAFF_ROLES = [
   "Senior Staff",
   "Staff",
   "Staff In Training",
+];
+
+// default radio channels that should always exist
+const DEFAULT_RADIO_CHANNELS = [
+  { id: "main", name: "Main Dispatch", type: "public" },
+  { id: "pd", name: "Police", type: "department", department: "pd" },
+  { id: "fire", name: "Fire", type: "department", department: "fire" },
+  { id: "ems", name: "EMS", type: "department", department: "ems" },
+  { id: "staff", name: "Staff HQ", type: "staff" },
 ];
 
 /* ===========================
@@ -73,7 +81,33 @@ if (!process.env.MONGO_URI) {
 }
 
 const client = new MongoClient(process.env.MONGO_URI);
-let db, Applications, Users, Appeals, Threads, Replies, Gallery;
+let db,
+  Applications,
+  Users,
+  Appeals,
+  Threads,
+  Replies,
+  Gallery,
+  RadioChannels;
+
+async function ensureDefaultRadioChannels() {
+  const count = await RadioChannels.countDocuments({});
+  if (count > 0) return;
+
+  const now = new Date().toISOString();
+  const docs = DEFAULT_RADIO_CHANNELS.map((ch, idx) => ({
+    ...ch,
+    type: ch.type || "public",
+    department: ch.department || null,
+    allowedRoles: [],
+    system: true,
+    createdAt: now,
+    order: idx + 1,
+  }));
+
+  await RadioChannels.insertMany(docs);
+  console.log("📡 Seeded default radio channels");
+}
 
 async function initDB() {
   await client.connect();
@@ -84,7 +118,10 @@ async function initDB() {
   Threads = db.collection("threads");
   Replies = db.collection("replies");
   Gallery = db.collection("gallery");
+  RadioChannels = db.collection("radioChannels");
   console.log("📦 MongoDB connected");
+
+  await ensureDefaultRadioChannels();
 }
 
 initDB().catch((err) => {
@@ -240,7 +277,8 @@ app.post("/apply", async (req, res) => {
     }
 
     const exists = await Applications.findOne({ $or: [{ id }, { email }] });
-    if (exists) return res.status(409).json({ error: "Application already exists" });
+    if (exists)
+      return res.status(409).json({ error: "Application already exists" });
 
     await Applications.insertOne({
       id,
@@ -363,33 +401,32 @@ app.post("/users/login", async (req, res) => {
       }
     );
 
-  // CHECK IF USER HAS ACCEPTED APPLICATION
-const hasDept = await Applications.findOne({
-  email: user.email,
-  status: "accepted"
-});
+    // CHECK IF USER HAS ACCEPTED APPLICATION
+    const hasDept = await Applications.findOne({
+      email: user.email,
+      status: "accepted",
+    });
 
-res.json({
-  success: true,
-  message: "Login OK",
-  user: {
-    id: user.id,
-    username: user.username,
-    email: user.email,
-    role: user.role,
-    hasDepartment: !!hasDept,   // <-- ADD THIS
-    department: hasDept ? hasDept.department : null, // <-- AND THIS
-    isStaff: STAFF_ROLES.includes(user.role), // <-- AND THIS
-    staffTag: user.staffTag || null,
-    staffIcon: user.staffIcon || null,
-    banned: !!user.banned,
-    banReason: user.banReason || null,
-    banDate: user.banDate || null,
-    bio: user.bio || "",
-    pfp: user.pfp || null,
-  },
-});
-
+    res.json({
+      success: true,
+      message: "Login OK",
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        hasDepartment: !!hasDept, // <-- HAS DEPARTMENT
+        department: hasDept ? hasDept.department : null, // <-- DEPARTMENT NAME
+        isStaff: STAFF_ROLES.includes(user.role), // <-- STAFF FLAG
+        staffTag: user.staffTag || null,
+        staffIcon: user.staffIcon || null,
+        banned: !!user.banned,
+        banReason: user.banReason || null,
+        banDate: user.banDate || null,
+        bio: user.bio || "",
+        pfp: user.pfp || null,
+      },
+    });
   } catch (err) {
     console.error("❌ Login Error:", err);
     res.status(500).json({ error: "Login failed" });
@@ -405,7 +442,9 @@ app.post("/users/change-username", async (req, res) => {
   try {
     const { id, username } = req.body;
     if (!id || !username || username.length < 3) {
-      return res.status(400).json({ error: "Invalid username change request" });
+      return res
+        .status(400)
+        .json({ error: "Invalid username change request" });
     }
 
     const result = await Users.updateOne({ id }, { $set: { username } });
@@ -426,7 +465,9 @@ app.post("/users/update-password", async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password || password.length < 6) {
-      return res.status(400).json({ error: "Invalid password update request" });
+      return res
+        .status(400)
+        .json({ error: "Invalid password update request" });
     }
 
     const result = await Users.updateOne(
@@ -466,7 +507,6 @@ app.post("/users/update", async (req, res) => {
     res.status(500).json({ error: "Update failed" });
   }
 });
-
 
 /* ===========================
    APPEALS – BANNED USERS ONLY
@@ -589,7 +629,7 @@ app.post("/users/:id/role", async (req, res) => {
   }
 });
 
-// FETCH USER BY ID (SESSION / SETTINGS)
+// FETCH USER BY ID (SESSION / SETTINGS / RADIO)
 app.get("/users/:id", async (req, res) => {
   try {
     const user = await Users.findOne({ id: req.params.id });
@@ -612,6 +652,7 @@ app.get("/users/:id", async (req, res) => {
       hwid: user.hwid || null,
       lastIP: user.lastIP || null,
       lastLoginAt: user.lastLoginAt || null,
+      department: user.department || null,
     });
   } catch (err) {
     console.error("❌ User Fetch Error:", err);
@@ -632,7 +673,10 @@ app.delete("/users/:id", async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    res.json({ success: true, message: "User and associated applications deleted" });
+    res.json({
+      success: true,
+      message: "User and associated applications deleted",
+    });
   } catch (err) {
     console.error("❌ User Delete Error:", err);
     res.status(500).json({ error: "Failed to delete user" });
@@ -693,7 +737,6 @@ app.post("/threads", async (req, res) => {
   }
 });
 
-
 // GET THREADS BY CATEGORY (NOW WITH AUTHOR INFO)
 app.get("/threads/:category", async (req, res) => {
   try {
@@ -731,7 +774,6 @@ app.get("/threads/:category", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch threads" });
   }
 });
-
 
 // GET SINGLE THREAD + ALL REPLIES WITH AUTHOR DATA
 app.get("/thread/:id", async (req, res) => {
@@ -787,7 +829,6 @@ app.get("/thread/:id", async (req, res) => {
   }
 });
 
-
 // CREATE REPLY (requires accepted department ONLY)
 app.post("/thread/:id/reply", async (req, res) => {
   try {
@@ -822,7 +863,6 @@ app.post("/thread/:id/reply", async (req, res) => {
   }
 });
 
-
 // DELETE THREAD (STAFF ONLY)
 app.delete("/thread/:id", async (req, res) => {
   try {
@@ -844,7 +884,6 @@ app.delete("/thread/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to delete thread" });
   }
 });
-
 
 // DELETE REPLY (STAFF ONLY)
 app.delete("/reply/:id", async (req, res) => {
@@ -876,9 +915,7 @@ app.delete("/reply/:id", async (req, res) => {
 // GET ALL GALLERY PHOTOS
 app.get("/gallery", async (req, res) => {
   try {
-    const photos = await Gallery.find({})
-      .sort({ createdAt: -1 })
-      .toArray();
+    const photos = await Gallery.find({}).sort({ createdAt: -1 }).toArray();
 
     res.json(photos);
   } catch (err) {
@@ -914,8 +951,130 @@ app.post("/gallery", async (req, res) => {
   }
 });
 
+/* ===========================
+   RADIO CHANNEL ROUTES
+   =========================== */
 
+// Get all radio channels
+app.get("/radio/channels", async (req, res) => {
+  try {
+    const chans = await RadioChannels.find({})
+      .sort({ order: 1, name: 1 })
+      .toArray();
+    res.json(chans);
+  } catch (err) {
+    console.error("❌ Radio Channels GET error:", err);
+    res.status(500).json({ error: "Failed to fetch radio channels" });
+  }
+});
 
+// Create a new radio channel (staff only)
+app.post("/radio/channels", async (req, res) => {
+  try {
+    const { userId, id, name, type, department, roles } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: "Missing userId" });
+    }
+
+    const user = await Users.findOne({ id: userId });
+    if (!user || !isStaff(user)) {
+      return res.status(403).json({ error: "Staff only" });
+    }
+
+    const trimmedName = (name || "").trim();
+    let channelId = (id || "").trim().toLowerCase();
+
+    if (!trimmedName) {
+      return res.status(400).json({ error: "Channel name is required" });
+    }
+
+    if (!channelId) {
+      channelId = trimmedName
+        .toLowerCase()
+        .replace(/\s+/g, "_")
+        .replace(/[^a-z0-9_]/g, "");
+    }
+
+    const existing = await RadioChannels.findOne({ id: channelId });
+    if (existing) {
+      return res.status(409).json({ error: "Channel ID already exists" });
+    }
+
+    let channelType = type || "custom";
+    if (!["public", "department", "staff", "custom"].includes(channelType)) {
+      channelType = "custom";
+    }
+
+    let allowedRoles = [];
+    if (Array.isArray(roles)) {
+      allowedRoles = roles;
+    } else if (typeof roles === "string" && roles.trim().length) {
+      allowedRoles = roles
+        .split(",")
+        .map((r) => r.trim())
+        .filter(Boolean);
+    }
+
+    const now = new Date().toISOString();
+    const order =
+      (await RadioChannels.estimatedDocumentCount()) + 1;
+
+    const channelDoc = {
+      id: channelId,
+      name: trimmedName,
+      type: channelType,
+      department: department || null,
+      allowedRoles,
+      system: false,
+      createdAt: now,
+      createdBy: user.username,
+      order,
+    };
+
+    await RadioChannels.insertOne(channelDoc);
+
+    res.json({ success: true, channel: channelDoc });
+  } catch (err) {
+    console.error("❌ Radio Channel CREATE error:", err);
+    res.status(500).json({ error: "Failed to create radio channel" });
+  }
+});
+
+// Delete a radio channel (staff only, cannot delete system)
+app.delete("/radio/channels/:id", async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const channelId = req.params.id;
+
+    if (!userId) {
+      return res.status(400).json({ error: "Missing userId" });
+    }
+
+    const user = await Users.findOne({ id: userId });
+    if (!user || !isStaff(user)) {
+      return res.status(403).json({ error: "Staff only" });
+    }
+
+    const channel = await RadioChannels.findOne({ id: channelId });
+    if (!channel) {
+      return res.status(404).json({ error: "Channel not found" });
+    }
+
+    if (channel.system) {
+      return res
+        .status(400)
+        .json({ error: "Cannot delete system radio channels" });
+    }
+
+    await RadioChannels.deleteOne({ id: channelId });
+
+    res.json({ success: true, message: "Radio channel deleted" });
+  } catch (err) {
+    console.error("❌ Radio Channel DELETE error:", err);
+    res.status(500).json({ error: "Failed to delete radio channel" });
+  }
+});
 
 /* ===========================
    START SERVER
